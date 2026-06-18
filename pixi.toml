@@ -1,0 +1,30 @@
+[project]
+name = "atlas-ewk-pmssm-run3-targets"
+version = "0.1.0"
+description = "Reproducible study: Run-3 EWK SUSY search targets from the ATLAS pMSSM scan (arXiv:2402.01392)"
+authors = ["agentic_demo"]
+channels = ["conda-forge", "bioconda"]
+# Multiple platforms so colleagues / CI on Linux or Intel macs can reproduce too.
+platforms = ["osx-arm64", "osx-64", "linux-64"]
+
+[dependencies]
+python = "3.11.*"
+snakemake-minimal = ">=8,<9"
+pandas = ">=2"
+numpy = ">=1.26"
+scipy = ">=1.11"
+matplotlib = ">=3.8"
+pyarrow = ">=15"
+pyyaml = ">=6"
+graphviz = ">=9"          # `dot`, for rendering the Snakemake DAG
+curl = ">=8"              # used by the `download` rule to fetch the ATLAS inputs
+
+[tasks]
+# Run the full study end-to-end (build everything declared by rule `all`)
+run = "snakemake --snakefile workflow/Snakefile --cores 4 --printshellcmds"
+# Dry-run: print the plan without executing
+plan = "snakemake --snakefile workflow/Snakefile --cores 1 --dry-run --printshellcmds"
+# Render the rule graph to docs/ (PNG for README embedding + SVG for zoomable detail)
+dag = "mkdir -p docs && snakemake --snakefile workflow/Snakefile --rulegraph | tee docs/dag.dot | dot -Tpng -o docs/dag.png && dot -Tsvg docs/dag.dot -o docs/dag.svg && rm -f docs/dag.dot"
+# Force a clean re-run
+clean = "rm -rf results"

@@ -1,0 +1,15 @@
+# Generated study outputs (reproduce with `pixi run run`)
+results/
+
+# pixi environment + snakemake bookkeeping
+.pixi/
+.snakemake/
+
+# Downloaded ATLAS inputs (regenerate with the `download` rule; tarballs are 174 MB)
+data/
+*.tar.gz
+
+# Misc (the rendered DAG lives in tracked docs/)
+__pycache__/
+*.pyc
+.DS_Store

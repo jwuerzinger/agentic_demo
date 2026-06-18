@@ -1,0 +1,74 @@
+# =====================================================================
+# Configuration for the Run-3 EWK SUSY target study
+# Data: ATLAS pMSSM EWK scan, arXiv:2402.01392 (SUSY-2020-15)
+# =====================================================================
+
+# Where the `download` rule fetches the input tarballs + CSVs from (ATLAS public page).
+download_base_url: https://atlas.web.cern.ch/Atlas/GROUPS/PHYSICS/PAPERS/SUSY-2020-15/inputs
+
+# Each scan ships as an SLHA tarball + an exclusion CSV (one row / model).
+# The `download` rule fetches these into data/.
+scans:
+  EWKino:
+    slha_tarball: data/EWKino_SLHA.tar.gz
+    exclusion_csv: data/EWKino.csv
+  Bino-DM:
+    slha_tarball: data/Bino-DM_SLHA.tar.gz
+    exclusion_csv: data/Bino-DM.csv
+
+# --- Exclusion & projection -----------------------------------------
+cls_threshold: 0.05         # CLs < threshold  =>  excluded at 95% CL
+baseline_lumi_fb: 140.0     # Run-2 dataset used in the paper
+target_lumi_fb: 450.0       # "Run 3" target = Run 2+3 combined (user choice)
+
+projection: sqrtL           # 'sqrtL'  = statistics-limited (optimistic)
+                            # 'sqrtL_syst' = reach saturates as L grows (conservative)
+systematics_fraction: 0.30  # only used by 'sqrtL_syst'; fraction of the rate that is systematics-limited
+
+# Which observed channels define the CURRENT (observed) exclusion status:
+#   'all'        = all 11 observed channels (incl. DisappearingTrack/h_to_inv/mA)
+#   'recastable' = only the 8 channels that also have an expected CLs
+obs_exclusion_channels: all
+
+# External-constraint flags from ATLAS (0 = excluded, 1 = not excluded):
+#   Flavour : b->s gamma, Bs->mu mu, B+->tau nu
+#   EW      : delta-rho, m(W), BR(Z->inv)
+#   DM      : relic density AND direct detection  (cosmology-dependent -> optional)
+# A "clean target" must PASS (==1) every constraint listed here. DM is intentionally
+# left out by default because the relic-density requirement is cosmology-dependent;
+# the report shows the target count with and without it.
+require_constraints: [EW, Flavour]
+
+# The 8 EWKino searches that report an EXPECTED CLs => recastable / projectable.
+projectable_analyses:
+  - FullHad
+  - 1Lbb
+  - 2L0J
+  - 2L2J
+  - Compressed
+  - 3LOffshell
+  - 3LOnshell
+  - 4L
+
+# Observed-only channels (published limits / extra constraints).
+# Used for the *current* (observed) exclusion status, NOT projected.
+obs_only_analyses:
+  - DisappearingTrack
+  - h_to_inv
+  - mA
+
+# --- Physics-class thresholds ---------------------------------------
+compressed_dm_max_gev: 35.0   # |dm(NLSP,LSP)| below this counts as "compressed"
+llp_ctau_min_mm: 1.0          # chargino ctau above this => long-lived (disappearing track)
+mixing_purity: 0.60           # |N|^2 fraction above which the LSP is a "pure" gaugino/higgsino
+mass_Z: 91.1876
+mass_h: 125.25
+mass_W: 80.379
+
+# --- Coverage holes -------------------------------------------------
+# A "hole" is a viable (constraint-passing), currently-allowed model that is so
+# light it should be copiously produced, yet NO search even expects sensitivity to
+# it (min expected CLs >= hole_expcls_min). These are structural gaps that more
+# luminosity does not fix.
+hole_mass_max_gev: 300.0      # min(m_chargino1, m_chi2) below this = copiously produced
+hole_expcls_min: 0.90         # min expected CLs above this = essentially no sensitivity

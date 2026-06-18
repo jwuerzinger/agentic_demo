@@ -1,0 +1,137 @@
+# =====================================================================
+# Run-3 EWK SUSY target study  (ATLAS pMSSM scan, arXiv:2402.01392)
+#
+# DAG (per scan):
+#   download -> parse_slha -> merge_exclusion -> project -> classify -> {plots, holes}
+#   report   <- (projected, targets, classified, class_counts, holes, plots) for all scans
+#   validate <- (classified, targets, holes) for all scans
+#
+# `download` fetches the SLHA tarballs + exclusion CSVs from the ATLAS public page,
+# so a fresh checkout needs no manual data step. Existing files are reused (the rule
+# has no inputs, so present outputs are considered up to date and not re-fetched).
+#
+# Invoke from the repo root inside the pixi env:
+#   pixi run run            # full study (downloads inputs if missing)
+#   pixi run plan           # dry-run (show the plan)
+#   pixi run dag            # render the DAG to results/dag.svg
+# =====================================================================
+import os
+import re
+
+configfile: "config/config.yaml"
+
+SCANS = list(config["scans"].keys())
+
+# Basenames of the input files (tarball + CSV per scan) the `download` rule fetches
+# into data/. config stores the full data/<name> paths that downstream rules consume.
+DATA_FILES = sorted({
+    os.path.basename(config["scans"][s][k])
+    for s in SCANS for k in ("slha_tarball", "exclusion_csv")
+})
+
+
+rule all:
+    input:
+        "results/report.md",
+        "results/class_summary.csv",
+        "results/validation.txt",
+        expand("results/{scan}/targets.parquet", scan=SCANS),
+        expand("results/{scan}/holes.parquet", scan=SCANS),
+        expand("results/{scan}/mass_plane.png", scan=SCANS),
+
+
+rule download:
+    """Fetch an input tarball or CSV from the ATLAS public page into data/ (first step)."""
+    output:
+        "data/{fname}",
+    wildcard_constraints:
+        fname="|".join(re.escape(f) for f in DATA_FILES),
+    params:
+        url=lambda wc: config["download_base_url"].rstrip("/") + "/" + wc.fname,
+    shell:
+        "curl -fSL --retry 3 --retry-delay 2 -o {output} {params.url}"
+
+
+rule parse_slha:
+    input:
+        tarball=lambda wc: config["scans"][wc.scan]["slha_tarball"],
+    output:
+        "results/{scan}/features.parquet",
+    params:
+        scan=lambda wc: wc.scan,
+    script:
+        "scripts/parse_slha.py"
+
+
+rule merge_exclusion:
+    input:
+        features="results/{scan}/features.parquet",
+        csv=lambda wc: config["scans"][wc.scan]["exclusion_csv"],
+    output:
+        "results/{scan}/merged.parquet",
+    script:
+        "scripts/merge.py"
+
+
+rule project:
+    input:
+        "results/{scan}/merged.parquet",
+    output:
+        "results/{scan}/projected.parquet",
+    script:
+        "scripts/project.py"
+
+
+rule classify:
+    input:
+        "results/{scan}/projected.parquet",
+    output:
+        classified="results/{scan}/classified.parquet",
+        targets="results/{scan}/targets.parquet",
+        summary="results/{scan}/class_counts.csv",
+    script:
+        "scripts/classify.py"
+
+
+rule holes:
+    input:
+        "results/{scan}/classified.parquet",
+    output:
+        holes="results/{scan}/holes.parquet",
+        summary="results/{scan}/holes_counts.csv",
+    script:
+        "scripts/holes.py"
+
+
+rule plots:
+    input:
+        "results/{scan}/projected.parquet",
+    output:
+        "results/{scan}/mass_plane.png",
+    script:
+        "scripts/plots.py"
+
+
+rule report:
+    input:
+        projected=expand("results/{scan}/projected.parquet", scan=SCANS),
+        targets=expand("results/{scan}/targets.parquet", scan=SCANS),
+        counts=expand("results/{scan}/class_counts.csv", scan=SCANS),
+        holes=expand("results/{scan}/holes.parquet", scan=SCANS),
+        plots=expand("results/{scan}/mass_plane.png", scan=SCANS),
+    output:
+        report="results/report.md",
+        class_summary="results/class_summary.csv",
+    script:
+        "scripts/report.py"
+
+
+rule validate:
+    input:
+        classified=expand("results/{scan}/classified.parquet", scan=SCANS),
+        targets=expand("results/{scan}/targets.parquet", scan=SCANS),
+        holes=expand("results/{scan}/holes.parquet", scan=SCANS),
+    output:
+        "results/validation.txt",
+    script:
+        "scripts/validate.py"

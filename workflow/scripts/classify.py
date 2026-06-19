@@ -64,10 +64,10 @@ def assign(r):
         if r["lsp_type"] == "wino":
             return "compressed-wino"
         return "compressed-mixed"
-    # 4) on-shell decays of chi2
-    if dm >= MH and r["n2_via_h"]:
+    # 4) on-shell decays of chi2 (summed BRs: Wh when h dominates over Z, else default to WZ)
+    if dm >= MH and r.get("br_n2_h", 0.0) > r.get("br_n2_Z", 0.0):
         return "Wh-1Lbb"
-    if dm >= MZ and (r["n2_via_Z"] or not r["n2_via_h"]):
+    if dm >= MZ:
         return "WZ-onshell-multilepton"
     # 5) off-shell / moderately compressed
     if DM_C <= dm < MZ:

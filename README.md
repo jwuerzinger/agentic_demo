@@ -7,8 +7,8 @@ analysis SUSY-2020-15).
 **Goals:**
 1. find pMSSM models that are **not excluded today** but where ATLAS is
    **expected to gain sensitivity in LHC Run 3**, grouped into physics classes;
-2. flag **coverage holes** — viable, light models the programme cannot even
-   *expect* to constrain, which more luminosity will **not** fix.
+2. flag **coverage holes** — viable models that need a *genuinely different* analysis
+   strategy than the searches in the scan (not just more luminosity or a re-optimisation).
 
 The whole study is orchestrated with **Snakemake** and runs inside a **pixi**
 environment, so it reproduces exactly on any machine.
@@ -58,10 +58,10 @@ the steps whose inputs or parameters changed.
 | **merge_exclusion** | Join with the per-analysis expected/observed CLs from the CSV (keyed by `Model_number`). |
 | **project** | Scale each of the 8 recastable searches' *expected* significance from 140 → target fb⁻¹; flag **targets**. |
 | **classify** | Assign each target to a physics class (compressed higgsino, on-shell WZ, Wh→1ℓbb, off-shell, disappearing track, …). |
-| **holes** | Find **coverage holes**: viable, light models with no expected sensitivity (not luminosity-fixable). |
+| **holes** | Find **coverage holes**: viable models in the *new-strategy* reach tier (a re-optimised included search can't reach them **and** their dominant signature is one none exploit), produced enough + not a covered class. |
 | **plots** | Mass-plane figures (excluded / allowed / target / hole). |
 | **report** | Assemble `results/report.md` + `results/class_summary.csv`; render a TikZ Feynman diagram for each populated class and extract a representative target/hole spectrum into `results/representatives/`. |
-| **sensitivity** | **Independent** toy cut-and-count reach of a *dedicated* soft-dilepton + ISR search (see `docs/search_design.md`) for **hand-selected benchmark models** (config `sensitivity.models`); depends only on the parsed spectra, not the classification. Illustrative, not a simulation. |
+| **sensitivity** | **Independent**, data-anchored estimate for **hand-selected benchmarks** (config `sensitivity.models`): how much better than the best current search a dedicated analysis must be to exclude each model — `R_req = μ₉₅(target)`, projected in signal-strength space (`μ₉₅ ∝ 1/√L`). Not a simulation. See `docs/search_design.md`. |
 | **validate** | Assert pipeline invariants; fails the build on any violation. |
 
 ### Target definition
@@ -95,15 +95,25 @@ ExpCLs_now = 0.15 → Z = 1.036 → Z(L) = 1.858 → ExpCLs(L) = 0.032 (< 0.05 �
 where the gain saturates. The generated `results/report.md` recomputes all of these
 numbers for whatever `target_lumi_fb` / `projection` you set.
 
-### A coverage **hole**
+### Reach tiers and the coverage **holes**
 
-is a model that is _viable_ (passes EW + Flavour + DM), _invisible_ (min expected CLs ≥
-`hole_expcls_min` across the 8 recastable searches), and _reachable in principle_ by a
-**dedicated** Run-3 search — enough EW-ino signal is produced at the target luminosity,
-`N = σ(m,mode)·L ≥ hole_min_run3_events` (approximate 13 TeV cross-sections, so winos
-reach higher mass than higgsinos). The √L projection of the existing searches does not
-help, so these need a **new or re-optimised search**. Signatures with an existing
-dedicated search (`hole_exclude_classes`, e.g. disappearing tracks) are excluded.
+For every viable, currently-allowed model we ask what it would take to exclude it at the
+target luminosity, via **`R_req`** — the improvement needed over the *best current search*,
+in signal-strength space (`μ₉₅ ∝ 1/√L`, the physically correct scaling). That sorts models
+into tiers (`reach_tier`, computed in `project.py`):
+
+- **luminosity** (`R_req ≤ 1`) — the existing searches reach them with Run-3 data alone;
+- **re-optimise** (`1 < R_req ≤ reopt_factor`) — a tweak of an included search (lower
+  thresholds, multivariate) would reach them;
+- **new-strategy** (`R_req > reopt_factor` **and** a dominant signature *no* included search
+  exploits — radiative χ̃₂⁰→χ̃₁⁰γ → soft-photon; tau-rich → tau);
+- **out-of-reach** (far, with no distinct alternative handle).
+
+A **hole** is a *new-strategy* model that is also produced enough for a dedicated search
+(`N = σ·L ≥ hole_min_run3_events`) and not already covered by an included dedicated search
+(`hole_exclude_classes`, e.g. disappearing tracks). I.e. it needs a **genuinely different
+analysis**, not a re-optimisation of what the scan already includes — each hole carries the
+suggested `alt_strategy`. (Holes and targets are disjoint: targets ≈ the `luminosity` tier.)
 
 ### What you get
 
@@ -111,7 +121,7 @@ dedicated search (`hole_exclude_classes`, e.g. disappearing tracks) are excluded
 |---|---|
 | `results/report.md` | **Read this first** — headline numbers, target classes, **coverage holes**, benchmarks, caveats. |
 | `results/class_summary.csv` | Target counts per class × scan. |
-| `results/<scan>/sensitivity.parquet` | Toy dedicated-search reach for the hand-selected benchmark models (S, B, Z, excludable). |
+| `results/<scan>/sensitivity.parquet` | Per benchmark: the (lepton-channel-anchored) improvement `R_req` over the best current search, plus a `verdict` — luminosity / lepton re-opt / **needs new channel (photon)** / out-of-reach. |
 | `results/validation.txt` | Pass/fail of every invariant check. |
 | `results/<scan>/targets.parquet` | Flagged target models with features, projection, class. |
 | `results/<scan>/holes.parquet` | Coverage-hole models. |
@@ -127,9 +137,11 @@ dedicated search (`hole_exclude_classes`, e.g. disappearing tracks) are excluded
 | `projection` | `sqrtL` | `sqrtL` (stat-limited) or `sqrtL_syst` (systematics floor, conservative). |
 | `require_constraints` | `[EW, Flavour, DM]` | External constraints a viable target must pass (`0 = excluded`). The report still breaks counts down by tier so each cut's effect is visible. |
 | `cls_threshold` | `0.05` | CLs below this ⇒ excluded at 95% CL. |
-| `hole_expcls_min` / `hole_min_run3_events` | `0.90` / `5000` | Hole = expected CLs above this **and** ≥ this many produced EW-ino events at target lumi (reachability). |
-| `hole_exclude_classes` | `[LLP-disappearing-track]` | Signatures already covered by a dedicated search, excluded from holes. |
-| `sensitivity:` block | — | Toy dedicated-search parameters (ε plateau, Δm turn-on, background, systematic). All illustrative; see `docs/search_design.md`. |
+| `reopt_factor` | `5.0` | `R_req` above this ⇒ re-optimising an included search can't reach it (→ new-strategy / out-of-reach tier). |
+| `hole_radiative_min` / `hole_tau_min` | `0.50` / `0.50` | BR thresholds for the "uncovered signature" flag: radiative χ̃₂⁰→χ̃₁⁰γ (→ soft-photon) / tau-rich (→ tau). |
+| `hole_min_run3_events` | `5000` | Production floor (σ·L) for a hole to be reachable in principle by a dedicated search. |
+| `hole_exclude_classes` | `[LLP-disappearing-track]` | Signatures already covered by an included dedicated search, excluded from holes. |
+| `sensitivity:` block | — | Benchmark `models` + `assumed_improvement` (the gain a re-optimised **lepton-channel** search is assumed to achieve, ~2–3×; **decoupled** from `reopt_factor`). The baseline is the real per-model expected CLs — no other free inputs. |
 | `compressed_dm_max_gev` / `llp_ctau_min_mm` | `35` / `1.0` | Class cuts: "compressed" Δm; long-lived chargino cτ. |
 
 ---
@@ -148,12 +160,13 @@ requirement is **EW+Flavour+DM** (last column):
 So **88 viable Run-3 targets** in **6 physics classes** (compressed mixed/higgsino,
 disappearing track, on-shell WZ, Wh→1ℓbb, off-shell WZ).
 
-**Coverage holes:** 409 (EWKino) + 140 (Bino-DM), **none** fixable by Run-3
-luminosity. They are overwhelmingly **compressed higgsinos** (EWKino) and
-**compressed binos** (Bino-DM) — near-degenerate spectra (Δm ~ few GeV) with decay
-products too soft for current selections, spanning m(χ₁±/χ₂⁰) ≈ 100–550 GeV (the
-reachability ceiling for higgsino-strength production at `hole_min_run3_events=5000`).
-The disappearing-track region is excluded — it already has a dedicated ATLAS search.
+**Coverage holes (new-strategy targets):** 534 (EWKino) + 171 (Bino-DM). Every one points
+to the **same different strategy — a soft-photon + ISR-jet search** — because their χ̃₂⁰ is
+**radiative-dominated** (χ̃₂⁰→χ̃₁⁰γ), a final state none of the included (lepton/jet/bb)
+searches exploit. (The photon is that *decay* photon; the *jet* is the ISR recoil that
+supplies the Eᵀmiss trigger — there is no ISR photon.) Re-optimising those searches can't reach them (`R_req` ≫ 5, often
+effectively ∞), so they need a genuinely new analysis, not more luminosity. They span
+m(χ̃₁±/χ̃₂⁰) ≈ 97–553 GeV and include the worked-example benchmark **EWKino 770**.
 
 ---
 

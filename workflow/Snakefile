@@ -118,11 +118,12 @@ rule holes:
 
 
 rule sensitivity:
-    """Toy cut-and-count reach of a dedicated soft-dilepton + ISR search for HAND-SELECTED
-    benchmark models (config sensitivity.models; see docs/search_design.md). Independent of
-    the target/hole classification -- depends only on the parsed spectra. Not a simulation."""
+    """How much better than the best current search a dedicated analysis must be to exclude
+    HAND-SELECTED benchmarks (config sensitivity.models; see docs/search_design.md). Anchored
+    to the real per-model expected CLs in merged.parquet, projected in signal-strength space.
+    Independent of the target/hole classification. Not a simulation."""
     input:
-        "results/{scan}/features.parquet",
+        "results/{scan}/merged.parquet",
     output:
         sensitivity="results/{scan}/sensitivity.parquet",
         summary="results/{scan}/sensitivity_summary.csv",

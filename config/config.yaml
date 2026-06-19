@@ -65,17 +65,25 @@ mass_Z: 91.1876
 mass_h: 125.25
 mass_W: 80.379
 
-# --- Coverage holes -------------------------------------------------
-# A "hole" is a viable (constraint-passing), currently-allowed, currently-INVISIBLE
-# model (no expected sensitivity from the 8 searches) that a *dedicated* Run-3 search
-# COULD reach -- i.e. enough EW-ino signal is produced at the target luminosity,
-# N = sigma(m, mode) * target_lumi >= hole_min_run3_events. This reachability gate
-# replaces a flat mass cap (winos, with larger sigma, count out to higher mass than
-# higgsinos). Classes already covered by a dedicated search are excluded.
-hole_expcls_min: 0.90              # min expected CLs above this = no sensitivity from the 8 searches
-hole_min_run3_events: 5000         # min produced EW-ino events at target lumi to be "reachable in principle"
-hole_exclude_classes:              # signatures with an existing dedicated (observed-only) search
-  - LLP-disappearing-track         #   covered by the ATLAS DisappearingTrack search
+# --- Search-strategy reach tiers & coverage holes -------------------
+# For each viable, currently-allowed model we ask what it would take to exclude it,
+# using R_req = the improvement over the best current search needed at the target lumi
+# (mu-space, mu95 ~ 1/sqrt(L); computed in project.py). The tiers (classify.py):
+#   lumi         : R_req <= 1                 -> existing searches + Run-3 luminosity
+#   reoptimise   : 1 < R_req <= reopt_factor  -> re-optimise an included search
+#   new-strategy : R_req > reopt_factor AND a dominant signature no included search uses
+#   out-of-reach : R_req > reopt_factor, no distinct alternative handle
+#
+# A HOLE is a *new-strategy* model that (a) is produced enough for a dedicated search
+# (N = sigma(m,mode)*target_lumi >= hole_min_run3_events), and (b) is not already covered
+# by an included dedicated search (hole_exclude_classes). I.e. a genuinely NEW search,
+# not a re-optimisation of what the pMSSM scan already includes.
+reopt_factor: 5.0              # max improvement a re-optimised included search can plausibly achieve
+hole_radiative_min: 0.50      # BR(chi2 -> chi1 gamma) above this = radiative -> soft-photon handle
+hole_tau_min: 0.50            # BR(chi1+ -> chi1 tau nu) above this = tau-rich -> tau handle
+hole_min_run3_events: 5000    # production floor (sigma*L) for "reachable in principle" by a dedicated search
+hole_exclude_classes:         # signatures with an existing dedicated search
+  - LLP-disappearing-track    #   covered by the ATLAS DisappearingTrack search
 
 # Approximate NLO+NLL EW-ino production cross-sections at sqrt(s)=13 TeV [GeV, fb]
 # (LHC SUSY Cross Section WG; order-of-magnitude). Shared by the hole reachability
@@ -86,38 +94,31 @@ xsec_13tev_fb:
   wino:     [[100, 13500], [150, 4000], [200, 1600], [250, 770], [300, 420],
              [400, 150], [500, 63], [700, 14], [1000, 2.6]]
 
-# --- Toy search-sensitivity estimate (sensitivity.py) ----------------
-# Illustrative cut-and-count projection of a *dedicated* soft-dilepton + ISR + MET
-# search (see docs/search_design.md). NOT a detector simulation: the efficiency
-# turn-on and background are parametrised (orders of magnitude anchored to the Run-2
-# compressed-higgsino search, arXiv:1911.12606). All knobs live here.
+# --- Search-sensitivity estimate (sensitivity.py) --------------------
+# For hand-selected benchmarks: how much BETTER than the best CURRENT search a dedicated
+# analysis would have to be to exclude the model at the target luminosity. It is
+# data-anchored (baseline = the real per-model expected CLs, min over the 8 searches) and
+# works in signal-strength space, where the expected 95% CL upper limit scales as
+#     mu95(L) = mu95(L0) * sqrt(L0 / L)      (the physically correct, monotonic scaling)
+# -- NOT the sqrt-L significance heuristic in project.py, which is only valid near the
+# exclusion boundary (ExpCLs <~ 0.5) and misbehaves for far-from-reach models (see the
+# caveat there). The required improvement factor is R_req = mu95(target): R_req <= 1 means
+# luminosity alone suffices. IMPORTANT: R_req is anchored to the best CURRENT search, which for
+# these compressed models is the soft-LEPTON search -- it uses NONE of the radiative photon. So
+# R_req measures the improvement needed FROM THE LEPTON CHANNEL; it cannot credit a new photon
+# channel. R_req <= assumed_improvement => reachable by re-optimising that lepton search; a larger
+# R_req on a radiative model => needs the NEW (soft-photon) channel, whose gain this metric does
+# not estimate (that needs simulation). Independent of the target/hole classification. NOT a sim.
 sensitivity:
-  # Hand-selected benchmark models to design/estimate the search for. This is an
-  # INDEPENDENT study off the parsed spectra (parse_slha) -- it does NOT depend on the
-  # target/hole classification. Edit the list to study other benchmarks. The three
-  # defaults deliberately span the compressed landscape (light vs heavier, higgsino vs bino).
+  # Hand-selected benchmarks spanning the spectrum: reachable-by-reopt -> needs-new-channel.
   models:
-    - {scan: EWKino, model: 770}     # ~183 GeV higgsino benchmark (the worked example)
-    - {scan: EWKino, model: 9030}    # ~101 GeV higgsino, very compressed (dm ~ 1.4 GeV)
-    - {scan: Bino-DM, model: 3766}   # ~144 GeV compressed bino (coannihilation)
-
-  # Signal efficiency vs splitting:  eff(dm) = eff_plateau * sigmoid((dm - eff_dm_half_gev)/eff_dm_width_gev)
-  eff_plateau: 0.03          # plateau A*eps at large dm. Motivation: the Run-2 soft-dilepton + ISR
-                             #   search (arXiv:1911.12606) reaches ~1-5% signal efficiency in its best
-                             #   (larger-dm) regions; 3% is a representative mid-range value.
-  eff_dm_half_gev: 6.0       # dm at half-plateau. Motivation: lepton pT scales ~ with dm, and the
-                             #   search reconstructs leptons only down to ~3-5 GeV, so acceptance is
-                             #   ~50% once dm reaches a few x that threshold (~5-10 GeV).
-  eff_dm_width_gev: 3.0      # turn-on width. Motivation: the lepton-pT spectrum smears the acceptance
-                             #   over a few GeV of dm rather than a sharp step.
-
-  # Background:  B = bkg_ref_events * (target_lumi_fb / bkg_ref_lumi_fb)  -- a single flat SR yield.
-  bkg_ref_events: 120.0      # reference SR background. Motivation: ORDER-OF-MAGNITUDE stand-in -- the
-                             #   Run-2 soft-dilepton SRs (arXiv:1911.12606) hold O(tens-hundreds) bkg
-                             #   events (fake/non-prompt leptons + WW + Z->tautau). NOT extracted from a
-                             #   specific bin; this is the toy's single biggest unverified assumption.
-  bkg_ref_lumi_fb: 140.0     # lumi the reference yield is quoted at (the Run-2 dataset of 1911.12606).
-  bkg_syst_frac: 0.30        # fractional bkg systematic. Motivation: these SRs are limited by the
-                             #   data-driven fake estimate; total background uncertainties run ~20-40%.
-  excl_significance: 1.64    # expected-exclusion threshold = Phi^-1(0.95) = 1.645, the standard
-                             #   one-sided 95% CL significance. This is a definition, not an assumption.
+    - {scan: EWKino, model: 770}     # radiative HOLE, R_req~8.7  -> needs the photon channel (worked example)
+    - {scan: EWKino, model: 9030}    # radiative HOLE, R_req~12.8 -> very compressed (dm~1.4), deeper
+    - {scan: EWKino, model: 9025}    # radiative REOPTIMISE, R_req~1.8 -> reachable by lepton re-optimisation
+    - {scan: Bino-DM, model: 3115}   # radiative HOLE, R_req~7.5  -> photon-dominated bino (dm~1.0), cross-scan
+  assumed_improvement: 3.0   # gain a re-optimised LEPTON-channel search is ASSUMED to achieve over the best
+                             #   current search (lower soft-lepton thresholds + multivariate selection).
+                             #   DECOUPLED from `reopt_factor` (the population-level tiering ceiling, 5.0):
+                             #   this is the benchmark-study verdict knob. A realistic lepton re-opt is ~2-3x.
+                             #   reach_reopt iff R_req <= this; R_req above it on a radiative model => the
+                             #   photon channel is the (unmodelled) lever, NOT "unreachable".

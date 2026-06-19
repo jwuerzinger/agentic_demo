@@ -123,23 +123,34 @@ def parse_one(text):
     out["c1_br"] = br_c1
     out["c1_daughters"] = "|".join(str(d) for d in dau_c1)
 
-    # Does chi2^0 / chi1^+ decay through a real slepton/Z/h/W?
-    def has(daus, pdgs):
-        return any(abs(d) in pdgs for d in daus)
-    out["n2_via_slepton"] = has(dau_n2, set(SLEP_CHARGED) | {1000012, 1000014, 1000016})
-    out["n2_via_Z"] = has(dau_n2, {23})
-    out["n2_via_h"] = has(dau_n2, {25})
-    out["c1_via_slepton"] = has(dau_c1, set(SLEP_CHARGED) | {1000012, 1000014, 1000016})
-    out["c1_via_W"] = has(dau_c1, {24})
+    # --- summed branching ratios of chi2^0 and chi1^+ by final state ---
+    # The LSP (1000022) recoils invisibly; bucket each decay by what accompanies it. On-shell
+    # 2-body decays give chi1 + {Z, h, gamma, W}; off-shell (compressed) 3-body decays give
+    # chi1 + a fermion pair. These SUMMED BRs (not just the single dominant channel) are what
+    # classify.py (WZ/Wh) and project.py (the radiative "uncovered signature" flag) read, so the
+    # radiative / WZ / Wh / leptonic determinations all sit on the same footing.
+    LEP, TAU, NU, QRK = {11, 13}, {15}, {12, 14, 16}, {1, 2, 3, 4, 5, 6}
 
-    # leptonic branching ratios used by the toy search-sensitivity step:
-    #   br_c1_lep = BR(chi1^+ -> chi1^0 ell nu), ell in {e, mu}
-    #   br_n2_ll  = BR(chi2^0 -> chi1^0 ell+ ell-), ell in {e, mu}
-    def br_with_lepton(pdg):
-        return sum(br for br, daus in decays.get(pdg, [])
-                   if any(abs(d) in (11, 13) for d in daus))
-    out["br_c1_lep"] = br_with_lepton(1000024)
-    out["br_n2_ll"] = br_with_lepton(1000023)
+    def br_by_final_state(pdg):
+        c = dict(Z=0.0, h=0.0, gamma=0.0, W=0.0, pi=0.0, lep=0.0, tau=0.0, qq=0.0, inv=0.0)
+        for br, daus in decays.get(pdg, []):
+            rest = sorted(abs(d) for d in daus if abs(d) != 1000022)   # strip the invisible LSP
+            if rest == [23]:                              c["Z"] += br
+            elif rest == [25]:                            c["h"] += br
+            elif rest == [22]:                            c["gamma"] += br      # radiative
+            elif rest == [24]:                            c["W"] += br
+            elif rest == [211]:                           c["pi"] += br         # chi1^+- -> chi1^0 pi^+- (LLP)
+            elif any(d in TAU for d in rest):             c["tau"] += br        # tau-containing (test first)
+            elif any(d in LEP for d in rest):             c["lep"] += br        # e/mu-containing
+            elif rest and all(d in QRK for d in rest):    c["qq"] += br
+            elif rest and all(d in NU for d in rest):     c["inv"] += br
+        return c
+
+    n2, c1 = br_by_final_state(1000023), br_by_final_state(1000024)
+    out["br_n2_Z"], out["br_n2_h"], out["br_n2_gamma"] = n2["Z"], n2["h"], n2["gamma"]
+    out["br_n2_ll"], out["br_n2_qq"] = n2["lep"], n2["qq"]   # ll = chi2 -> chi1 ell+ ell- (e/mu)
+    out["br_c1_W"], out["br_c1_lep"] = c1["W"], c1["lep"]     # lep = chi1 -> chi1 ell nu (e/mu)
+    out["br_c1_tau"], out["br_c1_qq"] = c1["tau"], c1["qq"]
 
     # lightest charged slepton
     sleps = [mass[p] for p in SLEP_CHARGED if p in mass]

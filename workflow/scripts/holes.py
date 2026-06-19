@@ -1,24 +1,18 @@
-"""Find coverage HOLES: viable, currently-invisible models that a *dedicated* Run-3
-search COULD reach, but for which no existing search even expects sensitivity.
+"""Coverage HOLES = genuinely NEW-search targets: viable, currently-allowed models that
+need a *significantly different* analysis strategy than the searches in the pMSSM scan.
 
-A model is a hole if, simultaneously:
-  * not excluded now (observed);
-  * viable: passes the required external constraints (EW, Flavour, DM);
-  * invisible to the programme: min expected CLs over the 8 recastable searches
-    >= hole_expcls_min (even the most sensitive expects ~no power);
-  * reachable in principle: enough EW-ino signal is produced at the target
-    luminosity that a dedicated search could plausibly exploit it,
-    N = sigma(m, mode) * target_lumi  >=  hole_min_run3_events;
-  * not in `hole_exclude_classes` -- e.g. the disappearing-track signature, which
-    already has a dedicated (observed-only) ATLAS search, so it is not a gap that
-    needs a *new* search.
+A model is a hole if (all of):
+  * it is in the `new-strategy` reach tier (set in classify.py): R_req over the best current
+    search exceeds `reopt_factor` (so re-optimising an included search will not reach it) AND
+    its dominant decay signature is one no included search exploits (radiative chi2->chi1 gamma
+    -> soft photon; tau-rich -> tau);
+  * it is produced enough at the target luminosity for a dedicated search to have a chance:
+    N = sigma(m_light, mode) * target_lumi >= hole_min_run3_events;
+  * its class is not already covered by an included dedicated search (`hole_exclude_classes`,
+    e.g. the disappearing-track signature).
 
-The reachability gate replaces a flat mass cap: because winos have a ~3x larger
-production cross-section than higgsinos, they count as reachable out to higher
-mass at the same event threshold.
-
-`lumi_fixable` records whether the plain sqrt-L projection of the *existing* searches
-would reach it (essentially never, by construction -- that is the point of a hole).
+(Viability and "not currently excluded" are already folded into the reach tier.) Each hole
+carries the `alt_strategy` its signature points to. Holes are ranked by how light they are.
 """
 import numpy as np
 import pandas as pd
@@ -27,49 +21,37 @@ df = pd.read_parquet(snakemake.input[0])                      # noqa: F821
 cfg = snakemake.config                                        # noqa: F821
 scan = snakemake.wildcards.scan                               # noqa: F821
 
-ECUT = float(cfg["hole_expcls_min"])
 NMIN = float(cfg["hole_min_run3_events"])
-LUMI = float(cfg["target_lumi_fb"])
+L = float(cfg["target_lumi_fb"])
 EXCLUDE = set(cfg.get("hole_exclude_classes", []) or [])
-
-# Approximate 13 TeV EW-ino cross-sections live in config (shared with sensitivity.py).
-# Used here ONLY as a reachability gate -- not for limit setting. mass [GeV] -> sigma [fb].
-_XS = cfg["xsec_13tev_fb"]
+XS = cfg["xsec_13tev_fb"]
 
 
 def xsec_fb(mass, mode):
-    pts = _XS["wino" if mode == "wino" else "higgsino"]   # bino/mixed -> higgsino (conservative)
-    xm = np.log([m for m, _ in pts])
-    ys = np.log([s for _, s in pts])
-    return float(np.exp(np.interp(np.log(max(mass, 1.0)), xm, ys)))
+    pts = XS["wino" if mode == "wino" else "higgsino"]        # bino/mixed -> higgsino (conservative)
+    return float(np.exp(np.interp(np.log(max(mass, 1.0)),
+                                  np.log([m for m, _ in pts]), np.log([s for _, s in pts]))))
 
 
 df["xsec_fb"] = [xsec_fb(m, l) for m, l in zip(df["m_light_ewk"], df["lsp_type"])]
-df["n_run3"] = df["xsec_fb"] * LUMI
+df["n_run3"] = df["xsec_fb"] * L
 
 mask = (
-    (~df["obs_excluded_now"])
-    & df["pass_required"]
-    & (df["exp_min_now"] >= ECUT)
+    (df["reach_tier"] == "new-strategy")
     & (df["n_run3"] >= NMIN)
     & (~df["phys_class"].isin(EXCLUDE))
 )
-holes = df[mask].copy()
-holes["lumi_fixable"] = holes["proj_excluded"]
+holes = df[mask].copy().sort_values("m_light_ewk")
 holes["scan"] = scan
-holes = holes.sort_values("m_light_ewk")
 
-by_class = holes.groupby("phys_class").size().rename("n").reset_index()
-by_lsp = holes.groupby("lsp_type").size().rename("n").reset_index()
+by_strategy = holes.groupby("alt_strategy").size().rename("n").reset_index()
 
-print(f"[{scan}] HOLES: {len(holes)} (ExpCLs>= {ECUT}, N_run3>= {NMIN:.0f} @ {LUMI:.0f} fb-1, "
-      f"viable, excl {sorted(EXCLUDE)})")
-print(f"[{scan}]   lumi-fixable: {int(holes.lumi_fixable.sum())}/{len(holes)}   "
-      f"DM-allowed: {int(holes.pass_DM.sum())}/{len(holes)}")
+print(f"[{scan}] HOLES (new-strategy, produced enough, not a covered class): {len(holes)}")
 if len(holes):
-    print(f"[{scan}]   m_light range: {holes.m_light_ewk.min():.0f}-{holes.m_light_ewk.max():.0f} GeV")
-    print(f"[{scan}]   by LSP: {by_lsp.set_index('lsp_type')['n'].to_dict()}")
-    print(f"[{scan}]   by class: {by_class.set_index('phys_class')['n'].to_dict()}")
+    print(f"[{scan}]   alt strategies: {holes.alt_strategy.value_counts().to_dict()}")
+    print(f"[{scan}]   by phys_class : {holes.phys_class.value_counts().to_dict()}")
+    print(f"[{scan}]   m_light range : {holes.m_light_ewk.min():.0f}-{holes.m_light_ewk.max():.0f} GeV; "
+          f"R_req {holes.R_req.min():.1f}-{holes.R_req.max():.1f}")
 
 holes.to_parquet(snakemake.output.holes, index=False)         # noqa: F821
-by_class.assign(scan=scan).to_csv(snakemake.output.summary, index=False)  # noqa: F821
+by_strategy.assign(scan=scan).to_csv(snakemake.output.summary, index=False)  # noqa: F821

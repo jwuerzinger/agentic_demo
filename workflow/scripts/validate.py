@@ -47,18 +47,21 @@ for clf_path, tgt_path, hole_path, sens_path in zip(
     frac = d[["f_bino", "f_wino", "f_higgsino"]]
     check(f"{scan}: composition fractions in [0,1]",
           bool(((frac >= -1e-6) & (frac <= 1 + 1e-6)).all().all()), "")
-    # holes: by construction insensitive, reachable, and not in an excluded class
+    # holes: by construction new-strategy tier, produced enough, not an excluded class
     if len(h):
-        check(f"{scan}: holes are insensitive", (h["exp_min_now"] >= float(cfg["hole_expcls_min"])).all(), "")
+        check(f"{scan}: holes are new-strategy tier", bool((h["reach_tier"] == "new-strategy").all()), "")
         check(f"{scan}: holes are Run-3-reachable",
-              (h["n_run3"] >= float(cfg["hole_min_run3_events"])).all(), "")
+              bool((h["n_run3"] >= float(cfg["hole_min_run3_events"])).all()), "")
         check(f"{scan}: holes exclude dedicated-search classes",
-              (~h["phys_class"].isin(set(cfg.get("hole_exclude_classes", []) or []))).all(), "")
+              bool((~h["phys_class"].isin(set(cfg.get("hole_exclude_classes", []) or []))).all()), "")
+        check(f"{scan}: holes have an uncovered signature & named strategy",
+              bool((h["alt_strategy"].astype(str).str.len() > 0).all()), "")
     # toy sensitivity: physical & restricted to the configured classes
     if len(s):
         want = {int(m["model"]) for m in cfg["sensitivity"]["models"] if m["scan"] == scan}
-        check(f"{scan}: sensitivity S,B >= 0", bool((s["S"] >= 0).all() and (s["B"] >= 0).all()), "")
-        check(f"{scan}: sensitivity Z finite", bool(np.isfinite(s["Z_excl"]).all()), "")
+        check(f"{scan}: sensitivity R_req > 0", bool((s["R_req"] > 0).all()), "")
+        check(f"{scan}: sensitivity exp_min_now in [0,1]",
+              bool(s["exp_min_now"].between(0.0, 1.0).all()), "")
         check(f"{scan}: sensitivity only on configured benchmark models",
               bool(s["model_number"].isin(want).all()), "")
 

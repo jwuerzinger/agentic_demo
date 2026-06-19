@@ -100,8 +100,8 @@ whenever the workflow or its commands change (the README also embeds `docs/dag.p
 config/config.yaml      # ALL parameters (lumi, CLs threshold, projection, constraints, class & hole cuts)
 workflow/Snakefile      # the DAG (rule `download` is first; `rule all` must stay the top rule)
 workflow/scripts/        parse_slha -> merge -> project -> classify ; holes ; plots ; report ; validate
-                         #   sensitivity branches off parse_slha (independent benchmark study)
-docs/search_design.md   # written compressed-higgsino soft-dilepton+ISR search strategy
+                         #   sensitivity branches off merge_exclusion (independent benchmark study)
+docs/search_design.md   # written radiative-compressed-higgsino soft-photon + ISR-jet search strategy
 figures/                # bespoke benchmark diagrams (e.g. EWKino770_target.*), not pipeline-generated
 data/                   # ATLAS inputs (fetched by `download`, git-ignored)
 docs/dag.png            # rendered rule graph (tracked, embedded in README)
@@ -110,44 +110,57 @@ results/representatives/ #   per-class TikZ Feynman diagrams + representative ta
 ```
 
 Pipeline per scan: `download → parse_slha → merge_exclusion → project → classify` (+ `plots`, `holes`); a
-separate `sensitivity` branch hangs off `parse_slha` (independent benchmark study); then `report` + `validate`
+separate `sensitivity` branch hangs off `merge_exclusion` (independent benchmark study); then `report` + `validate`
 fan in all scans. Scripts use the Snakemake `script:` directive — they read the injected
 `snakemake` object (`snakemake.input/output/params/config/wildcards`), not argparse. (The `download` rule uses
 `shell:` with `curl`; its output is `data/{fname}` with a `wildcard_constraints` on the known filenames.)
 
 ### Method
 
-- **`project.py`** — √L scaling of expected significance from `baseline_lumi_fb` (140) to `target_lumi_fb`
-  (450): `Z = Φ⁻¹(1−ExpCLs)`, `Z(L) = Z·scale`, `ExpCLs(L) = Φ(−Z(L))`, where `scale = √(L/L₀)` for
-  `projection: sqrtL` or a saturating factor for `projection: sqrtL_syst` (uses `systematics_fraction`). A
-  **target** is *not excluded now* (observed and expected CLs ≥ 0.05), *projected-excluded* at the target lumi
-  (< 0.05), **and** passes `require_constraints` (EW+Flavour+DM by default).
+- **`project.py`** — (i) √L scaling of expected significance to `target_lumi_fb` for the **targets**
+  (`Z = Φ⁻¹(1−ExpCLs)`, `Z(L)=Z·scale`; `sqrtL` or `sqrtL_syst`); a target is not-excluded-now,
+  projected-excluded, and passes `require_constraints`. (ii) Also computes the **`reach_tier`** (the search-
+  strategy axis) in *signal-strength* space: `R_req = μ₉₅(target)` with `μ₉₅(L)=μ₉₅(L0)·√(L0/L)` and
+  `μ₉₅` from `exp_min_now` (best of the 8) via the asymptotic `ExpCLs(μ)=2(1−Φ(μ/σ))`. Tiers: `lumi`
+  (R_req≤1), `reoptimise` (≤`reopt_factor`), `new-strategy` (>`reopt_factor` AND `signature_uncovered`:
+  radiative χ̃₂⁰→χ̃₁⁰γ ≥ `hole_radiative_min` or tau-rich), `out-of-reach`. The √L *significance* heuristic is
+  only valid near the boundary (see the project.py docstring); the tier/R_req use the correct μ-space scaling.
 - **`classify.py`** — bins targets into physics classes via interpretable cuts (LSP composition from `NMIX`,
   mass splittings, intermediate sleptons, chargino cτ); also writes the full `classified.parquet`.
-- **`holes.py`** — coverage holes: viable (constraint-passing), *insensitive* (`min ExpCLs ≥ hole_expcls_min`
-  over the 8 searches), and *reachable in principle* by a dedicated Run-3 search (produced yield
-  `N = σ(m,mode)·target_lumi ≥ hole_min_run3_events`, using an embedded approximate 13 TeV EW-ino
-  cross-section table — winos reach higher mass than higgsinos). Signatures with an existing dedicated search
-  (`hole_exclude_classes`, e.g. disappearing tracks — observed-only, not √L-projectable) are excluded. Not
-  luminosity-fixable. Dominated by compressed higgsinos (EWKino) / compressed binos (Bino-DM).
+- **`holes.py`** — coverage holes = the **`new-strategy`** reach tier (a re-optimised included search can't
+  reach them AND a dominant signature none of them exploits → a genuinely *different* analysis, named in
+  `alt_strategy`), additionally requiring production `N = σ·target_lumi ≥ hole_min_run3_events` and
+  exclusion of classes with an existing dedicated search (`hole_exclude_classes`, e.g. disappearing tracks).
+  Holes and targets are **disjoint** (targets ≈ the `lumi` tier). In these scans every hole is a radiative
+  compressed higgsino/bino → a **soft-photon + ISR-jet** search (the photon is the χ̃₂⁰→χ̃₁⁰γ *decay* photon,
+  the jet is ISR recoil for the Eᵀmiss trigger — not an ISR photon). The decay-based logic (`classify` WZ/Wh,
+  the `project` signature flag) reads `parse_slha`'s summed BR set: `br_n2_{Z,h,gamma,ll,qq}`,
+  `br_c1_{W,lep,tau,qq}` — full branching fractions per final state, not single-dominant-channel flags.
 - **`report.py`** — besides the markdown report, for each class present among targets ∪ holes it renders a
   **plain-TikZ Feynman diagram** (compiled with `tectonic`, rasterised with `pdftoppm`) and extracts a
   representative target/hole **SLHA spectrum** (via the `slha_path` column recorded by `parse_slha`) into
   `results/representatives/` with a `MANIFEST.csv`. Diagrams use core pgf only (no `tikz-feynman`); `tectonic`
   is self-contained (fetches its TeX bundle once, then caches), so a render failure is a real error.
-- **`sensitivity.py`** — TOY cut-and-count reach of a *dedicated* soft-dilepton + ISR search (design in
-  `docs/search_design.md`) for **hand-selected benchmark models** (`config["sensitivity"]["models"]`, default
-  EWKino 770/9030, Bino-DM 3766). **Independent study**: it reads `features.parquet` (parse_slha) and computes
-  Δm/m_light/lsp inline — it does *not* depend on classify/project/holes (see the DAG: it branches off
-  `parse_slha`). `S = σ·L·ε(Δm)·BR(χ̃₁±→ℓ)²`, `B` scaled from a reference SR yield, Asimov `Z` with a background
-  systematic; flags `excludable` (Z ≥ 1.64). Uses `br_c1_lep` (parse) + the shared `xsec_13tev_fb` table.
-  **Not a simulation** — `ε`/`B` are config knobs (order-of-magnitude, arXiv:1911.12606); *relative* reach only.
-  Current toy: EWKino 770 excludable at Z≈2.7.
+- **`sensitivity.py`** — for **hand-selected benchmarks** (`config["sensitivity"]["models"]`; EWKino 770/9030/9025,
+  Bino-DM 3115), *how much better than the best current search a dedicated analysis must be* to exclude the model.
+  **Independent study**: reads `merged.parquet` (the real per-model expected CLs), branches off `merge_exclusion`
+  — *not* classify/project/holes. Baseline = `exp_min_now` (min ExpCLs over the 8); mapped to an expected limit on
+  signal strength via the asymptotic `ExpCLs(μ)=2(1−Φ(μ/σ))`, then projected in μ-space `μ₉₅(L)=μ₉₅(L0)·√(L0/L)`
+  (the physically correct, monotonic scaling — see the √L caveat in `project.py`). Output `R_req = μ₉₅(target)`.
+  **Key subtlety:** the best current search for these compressed models is the soft-*lepton* one, which uses
+  *none* of the radiative χ̃₂⁰→χ̃₁⁰γ photon, so **`R_req` is lepton-channel-anchored** and cannot credit a photon
+  search. Hence the `verdict`: `luminosity` (R_req≤1) → `lepton re-opt` (R_req≤`assumed_improvement`) →
+  `needs new channel (photon)` (radiative & beyond that — the soft-photon channel is the *unmodelled* lever, **not**
+  "unreachable") → `out of reach` (non-radiative & beyond). `assumed_improvement` (the lepton re-opt gain, ~2–3×) is
+  **decoupled** from `reopt_factor` (the population-tiering ceiling, 5.0). **Not a simulation.** Current result:
+  9025 ~1.8× (lepton re-opt), 770/3115 ~8.7/7.5× and 9030 ~12.8× (needs the photon channel).
 - **`validate.py`** — asserts pipeline invariants and fails the build on any violation.
 
 Current result (require_constraints = EW+Flavour+DM): 88 viable targets (41 EWKino + 47 Bino-DM) in 6 populated
-classes; 409 (EWKino) + 140 (Bino-DM) coverage holes (m ≈ 100–550 GeV, reachability-gated), dominated by compressed higgsinos/binos (see
-`results/report.md`). Relaxing `require_constraints` to `[EW, Flavour]` raises the targets to 251 + 313.
+classes; reach tiers (viable, not-excluded) ≈ lumi / reoptimise / new-strategy / out-of-reach; **705 holes**
+(534 EWKino + 171 Bino-DM), all radiative compressed higgsinos/binos → a **soft-photon + ISR-jet** search, m ≈
+97–553 GeV, incl. benchmark 770 (see `results/report.md`). Relaxing `require_constraints` to `[EW, Flavour]`
+raises the targets to 251 + 313.
 
 ### Gotchas
 

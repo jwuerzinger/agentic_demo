@@ -427,51 +427,63 @@ if empty:
               "(e.g. sleptons are decoupled at ~10 TeV, so slepton-mediated cascades cannot occur): "
               + ", ".join(f"`{c}`" for c in empty) + ".\n")
 
-# ---- coverage holes -------------------------------------------------
-md.append("## Coverage holes — gaps a new search should cover\n")
+# ---- search-strategy reach tiers & coverage holes -------------------
 _excl = cfg.get("hole_exclude_classes", []) or []
-md.append(
-    f"A **hole** is a model that is _viable_ (passes {REQ}), _invisible_ to the whole programme "
-    f"(min expected CLs ≥ {cfg['hole_expcls_min']} across the 8 recastable searches), and "
-    f"_reachable in principle_ by a **dedicated** Run-3 search — enough EW-ino signal is produced at "
-    f"{L:.0f} fb⁻¹ that a dedicated analysis could plausibly exploit it "
-    f"(N = σ(m,mode)·L ≥ {int(cfg['hole_min_run3_events'])} events; σ from approximate 13 TeV NLO+NLL "
-    f"curves, so winos reach higher mass than higgsinos). The √L projection of the *existing* searches "
-    f"does not help (CLs ≈ 1 stays ≈ 1) — these need a **new or re-optimised search**, not more luminosity."
-    + (f"\n\n_Excluded by construction: `{', '.join(_excl)}` — the disappearing-track signature already "
-       f"has a dedicated ATLAS search (observed-only here, so this √L study cannot project it, but it is "
-       f"not a gap needing a *new* search)._\n" if _excl else "\n"))
+_rf = cfg["reopt_factor"]
+md.append("## What would it take? Reach tiers & coverage holes\n")
+md.append(f"For every **viable, currently-allowed** model we ask what it would take to exclude it at "
+          f"{L:.0f} fb⁻¹, via **`R_req`** — the improvement needed over the **best current search**, in "
+          f"signal-strength space (`μ₉₅ ∝ 1/√L`, the physically correct scaling):\n")
+md.append(f"| Scan | luminosity (R≤1) | re-optimise (R≤{_rf:g}) | **new strategy** | out-of-reach |")
+md.append("|---|---:|---:|---:|---:|")
+for scan, d in proj.items():
+    vc = d[(~d["obs_excluded_now"]) & d["pass_required"]]["reach_tier"].value_counts()
+    md.append(f"| {scan} | {int(vc.get('lumi', 0))} | {int(vc.get('reoptimise', 0))} | "
+              f"**{int(vc.get('new-strategy', 0))}** | {int(vc.get('out-of-reach', 0))} |")
+md.append("\n- **luminosity** — the existing searches reach these with Run-3 data alone (≈ the targets above).\n"
+          "- **re-optimise** — a tweak of an included search (lower thresholds, multivariate) would reach them.\n"
+          "- **new strategy** — re-optimising the included searches is *not* enough **and** the dominant signature "
+          "is one none of them exploits (radiative χ̃₂⁰→χ̃₁⁰γ → soft photon; tau-rich → tau). These need a "
+          "genuinely different analysis.\n"
+          "- **out-of-reach** — far from the included searches, with no distinct alternative handle.\n")
+md.append(f"A **hole** = a *new-strategy* model that is also produced enough for a dedicated search "
+          f"(N = σ·L ≥ {int(cfg['hole_min_run3_events'])} events) and not already covered by an included "
+          f"dedicated search ({', '.join(f'`{c}`' for c in _excl) or 'none'}).\n")
+
+def fmt_R(x):
+    """R_req display: huge values mean the included searches are totally blind (R_req->inf)."""
+    return "≫10³" if (not np.isfinite(x)) or x > 1e3 else f"{x:.1f}"
+
+
+md.append(f"### Holes — genuinely new-search targets ({len(all_h)})\n")
 if len(all_h):
-    md.append("| Scan | Holes | Lumi-fixable @ target L | also DM-allowed | dominant LSP | dominant class |")
-    md.append("|---|---:|---:|---:|---|---|")
+    md.append("| Scan | Holes | suggested strategy | dominant class | m(χ₁±/χ₂⁰) [GeV] | median R_req |")
+    md.append("|---|---:|---|---|---|---|")
     for scan, h in holes.items():
         if not len(h):
             md.append(f"| {scan} | 0 | – | – | – | – |")
             continue
-        dom_lsp = h.lsp_type.value_counts().idxmax()
-        dom_cls = h.phys_class.value_counts().idxmax()
-        md.append(f"| {scan} | {len(h)} | {int(h.lumi_fixable.sum())} | {int(h.pass_DM.sum())} | "
-                  f"`{dom_lsp}` | `{dom_cls}` |")
-    md.append("")
-    mlo, mhi = all_h["m_light_ewk"].min(), all_h["m_light_ewk"].max()
-    md.append(f"**Take-away:** the holes are overwhelmingly **compressed spectra** "
-              f"(near-degenerate χ with Δm of order a few GeV → decay products too soft to trigger/select), "
-              f"spanning m(χ₁±/χ₂⁰) ≈ {mlo:.0f}–{mhi:.0f} GeV. In the EWKino scan they are dominated by "
-              f"**compressed higgsinos**; in Bino-DM by **compressed binos** (coannihilation region). "
-              f"None are fixed by Run-3 luminosity — all need a dedicated soft-object + ISR search.\n")
-    bcols = ["scan", "model_number", "m_n1", "m_light_ewk", "dm_n2n1",
-             "lsp_type", "n_run3", "exp_min_now", "pass_DM"]
+        md.append(f"| {scan} | {len(h)} | {h.alt_strategy.value_counts().idxmax()} | "
+                  f"`{h.phys_class.value_counts().idxmax()}` | "
+                  f"{h.m_light_ewk.min():.0f}–{h.m_light_ewk.max():.0f} | {fmt_R(h.R_req.median())} |")
+    md.append(f"\n**Take-away:** these are models the included searches can't be re-optimised into reach "
+              f"(R_req > {_rf:g}×) **and** whose dominant decay is a signature none of them use — so they call "
+              f"for a *different* analysis (named per model in `alt_strategy`), chiefly a "
+              f"**soft-photon + ISR-jet** search — the photon being the radiative decay χ̃₂⁰→χ̃₁⁰γ (a final "
+              f"state none of the lepton/jet/bb searches reconstruct), not initial-state radiation. "
+              f"**EWKino 770 is one of these.**\n")
+    bcols = ["scan", "model_number", "m_n1", "dm_n2n1", "br_n2_gamma", "alt_strategy", "R_req"]
     bcols = [c for c in bcols if c in all_h.columns]
     bench = all_h.sort_values("m_light_ewk").head(8)
-    md.append("Lightest holes (most copiously produced, hence most urgent):\n")
+    md.append("Lightest holes (R_req ≫10³ = the included searches are effectively blind):\n")
     md.append("| " + " | ".join(bcols) + " |")
     md.append("|" + "---|" * len(bcols))
     for _, r in bench.iterrows():
-        md.append("| " + " | ".join(f"{r[c]:.3g}" if isinstance(r[c], float) else str(r[c])
-                                    for c in bcols) + " |")
+        cells = [fmt_R(r[c]) if c == "R_req" else
+                 (f"{r[c]:.3g}" if isinstance(r[c], float) else str(r[c])) for c in bcols]
+        md.append("| " + " | ".join(cells) + " |")
     md.append("")
-    # per-hole-class topology + representative spectrum
-    md.append("### Hole topologies & representative spectra\n")
+    md.append("#### Topologies & representative spectra\n")
     for cls in hole_classes:
         title = CLASS_META.get(cls, (cls,))[0]
         n = int((all_h["phys_class"] == cls).sum())
@@ -482,43 +494,55 @@ if len(all_h):
             md.append(f"Representative spectrum: [`{SLHA[('hole', cls)]}`]({reprel(SLHA[('hole', cls)])})\n")
     md.append("")
 else:
-    md.append("_No holes found at the configured thresholds._\n")
+    md.append("_No new-strategy holes at the configured thresholds._\n")
 
 # ---- toy search-design sensitivity --------------------------------
 all_s = pd.concat(sens.values(), ignore_index=True) if sens else pd.DataFrame()
-md.append("## Designing a search for the compressed-higgsino holes\n")
-md.append("The dominant holes are compressed higgsinos/binos. A **dedicated soft opposite-sign dilepton "
-          "+ ISR-jet + Eᵀmiss search** targets them; the full analysis design (trigger, soft-lepton "
-          "reconstruction, discriminating variables, backgrounds, control/validation regions, "
+md.append("## Designing a search for the radiative compressed-higgsino holes\n")
+md.append("The holes are radiative compressed higgsinos/binos (χ̃₂⁰→χ̃₁⁰γ). A **dedicated soft-photon "
+          "+ ISR-jet + Eᵀmiss search** — tagging the radiative photon, with the associated soft lepton "
+          "from χ̃₁± as a complementary region — targets them; the full analysis design (trigger, low-pT "
+          "photon reconstruction, discriminating variables, backgrounds, control/validation regions, "
           "interpretation) is written up in [`docs/search_design.md`](../docs/search_design.md).\n")
 _fig = "figures/EWKino770_target.png"
 if os.path.exists(_fig):
     md.append(f"Benchmark topology (EWKino 770):\n\n![EWKino 770 target diagram]({os.path.join('..', _fig)})\n")
 
 if len(all_s):
-    sc = cfg["sensitivity"]
-    md.append(f"\n### Toy sensitivity at {L:.0f} fb⁻¹ (illustrative — not a simulation)\n")
-    md.append(f"**Independent** benchmark study (config `sensitivity.models`, off the parsed spectra — "
-              f"not the target/hole classification). Parametrised cut-and-count: S = σ·L·ε(Δm)·BR(χ̃₁±→ℓ)², "
-              f"ε plateau {sc['eff_plateau']}, background {sc['bkg_ref_events']:.0f}·(L/{sc['bkg_ref_lumi_fb']:.0f}) "
-              f"events, {int(100*sc['bkg_syst_frac'])}% syst; expected-excludable at Z ≥ {sc['excl_significance']}.\n")
-    cols = ["scan", "model_number", "lsp_type", "m_n1", "dm_n2n1", "br_c1_lep",
-            "xsec_fb", "eff", "S", "B", "Z_excl", "excludable"]
+    rimp = float(cfg["sensitivity"]["assumed_improvement"])
+    md.append(f"\n### How much better would a search need to be? (at {L:.0f} fb⁻¹)\n")
+    md.append("**Independent**, data-anchored estimate (config `sensitivity.models`). The baseline is the "
+              "**real** per-model expected CLs (the best of the 8 current searches), projected in "
+              "signal-strength space (`μ₉₅ ∝ 1/√L`, the physically correct scaling — see the √L caveat below). "
+              f"**`R_req`** is the improvement needed over that best current search. **Crucially, for these "
+              f"compressed models the best current search is the soft-*lepton* one — it uses *none* of the "
+              f"radiative χ̃₂⁰→χ̃₁⁰γ photon — so `R_req` is anchored to the lepton channel.** The verdict reads: "
+              f"`luminosity` (`R_req ≤ 1`) → `lepton re-opt` (`R_req ≤ {rimp:g}`: re-optimise that lepton search) "
+              f"→ **`needs new channel (photon)`** (radiative & beyond that — the soft-photon channel is the "
+              f"lever, whose gain this metric does **not** estimate; **not** 'unreachable') → `out of reach` "
+              f"(non-radiative & beyond the lepton re-opt gain).\n")
+    cols = ["scan", "model_number", "m_n1", "dm_n2n1", "br_n2_gamma", "exp_min_now",
+            "R_req", "reach_reopt", "verdict"]
     cols = [c for c in cols if c in all_s.columns]
-    order = all_s.assign(_k=(all_s["model_number"] != 770).astype(int)).sort_values(
-        ["_k", "Z_excl"], ascending=[True, False])
+    order = all_s.assign(_k=(all_s["model_number"] != 770).astype(int)).sort_values(["_k", "R_req"])
     md.append("| " + " | ".join(cols) + " |")
     md.append("|" + "---|" * len(cols))
     for _, r in order.iterrows():
         md.append("| " + " | ".join(f"{r[c]:.3g}" if isinstance(r[c], float) else str(r[c])
                                     for c in cols) + " |")
-    n_b, n_exc = len(all_s), int(all_s["excludable"].sum())
+    n_reopt = int((all_s["verdict"] == "lepton re-opt").sum())
+    n_photon = int((all_s["verdict"] == "needs new channel (photon)").sum())
     b770 = all_s[(all_s.scan == "EWKino") & (all_s.model_number == 770)]
-    v = (f" **EWKino 770**: {'excludable' if bool(b770['excludable'].iloc[0]) else 'NOT excludable'} at "
-         f"Z = {float(b770['Z_excl'].iloc[0]):.1f}." if len(b770) else "")
-    md.append(f"\n**Verdict:** of the {n_b} hand-selected benchmarks, **{n_exc} are projected excludable** by "
-              f"the dedicated search under these (optimistic) assumptions.{v} ε(Δm) and the background are "
-              f"`config.yaml` knobs — read this as a *relative* plausibility check, not a real limit.\n")
+    v = (f" **EWKino 770** needs **{float(b770['R_req'].iloc[0]):.1f}×** *from the lepton channel* — beyond a "
+         f"lepton re-optimisation, so its 69%-BR radiative photon is the handle a dedicated search would exploit."
+         if len(b770) else "")
+    md.append(f"\n**Verdict:** `R_req` spans **{all_s['R_req'].min():.1f}–{all_s['R_req'].max():.1f}×**. "
+              f"**{n_reopt}/{len(all_s)}** are reachable by re-optimising the existing soft-lepton search "
+              f"(`R_req ≤ {rimp:g}`); **{n_photon}/{len(all_s)}** are radiative models whose lepton-channel "
+              f"`R_req` is too large — for those the **soft-photon channel** (a final state the current searches "
+              f"discard) is the lever, and whether it suffices needs a real simulation, not this metric.{v} "
+              f"(The `assumed_improvement` lepton re-opt gain is the one tunable input; everything else is the "
+              f"real per-model sensitivity.)\n")
 
 md.append("## Figures\n")
 for scan, p in plots.items():
@@ -530,6 +554,11 @@ md.append(f"- This run used `projection: {cfg.get('projection', 'sqrtL')}`. `sqr
           "**statistics-limited** (optimistic) bound; set `projection: sqrtL_syst` in "
           "`config.yaml` for the conservative bound where reach saturates as luminosity grows "
           "(`systematics_fraction` controls the saturation).\n"
+          "- The √L *significance* scaling used for targets/holes is only valid near the exclusion "
+          "boundary (ExpCLs ≲ 0.5). For far-from-reach models (holes, ExpCLs ≥ 0.90) it is unphysical "
+          "(sensitivity appears to degrade with luminosity), so the holes' projected-CLs *values* are not "
+          "meaningful — though the qualitative 'not luminosity-fixable' conclusion is robust. The "
+          "search-sensitivity section above uses the correct signal-strength scaling (μ₉₅ ∝ 1/√L) instead.\n"
           "- Projections reuse the **published Run-2 analyses' expected CLs**; a genuinely "
           "new/optimised search could do better than this proxy.\n"
           "- Decay-mode flags (WZ vs Wh vs slepton) use the **dominant** branching ratio "

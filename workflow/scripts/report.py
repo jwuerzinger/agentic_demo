@@ -3,11 +3,31 @@ physics descriptions, per-scan counts, suggested searches, and representative
 benchmark models. Writes results/report.md and results/class_summary.csv.
 """
 import os
+import shutil
+import subprocess
+import tarfile
+import numpy as np
 import pandas as pd
+from scipy.special import ndtri, ndtr
 
 cfg = snakemake.config                                        # noqa: F821
 L = float(cfg["target_lumi_fb"])
 L0 = float(cfg["baseline_lumi_fb"])
+THR = float(cfg["cls_threshold"])
+
+# luminosity scale factor (mirror project.py) for the Method section
+_ratio = L / L0
+if cfg.get("projection", "sqrtL") == "sqrtL_syst":
+    _f = float(cfg.get("systematics_fraction", 0.30))
+    SCALE = np.sqrt(_ratio) / np.sqrt(1.0 + _f * (_ratio - 1.0))
+else:
+    SCALE = np.sqrt(_ratio)
+# current expected-CLs band that newly crosses threshold at the target lumi:
+#   ExpCLs(L) < THR  <=>  ExpCLs_now < 1 - Phi( Phi^-1(1-THR) / scale )
+BAND_HI = float(1.0 - ndtr(ndtri(1.0 - THR) / SCALE))
+# worked example: a model with ExpCLs_now = 0.15
+EX_NOW = 0.15
+EX_PROJ = float(ndtr(-(ndtri(1.0 - EX_NOW) * SCALE)))
 
 # Human-facing metadata per class: (title, physics, signature, suggested Run-3 search)
 CLASS_META = {
@@ -74,6 +94,140 @@ CLASS_META = {
 BENCH_COLS = ["scan", "model_number", "m_n1", "m_n2", "m_c1", "dm_n2n1",
               "lsp_type", "ctau_c1_mm", "proj_driver", "exp_min_now", "exp_min_proj"]
 
+# ---------------------------------------------------------------------------
+# Per-class Feynman diagrams. Plain TikZ + core pgf decorations only (shipped by
+# any TeX Live) -- no external tikz-feynman package, so the pixi env is self-
+# sufficient. pp -> EW-ino pair (Drell-Yan) on the left; class-specific decays
+# on the right.
+# ---------------------------------------------------------------------------
+TIKZ_HEADER = r"""\documentclass[border=6pt]{standalone}
+\usepackage{tikz}\usepackage{amsmath}\usepackage{amssymb}
+\usetikzlibrary{decorations.pathmorphing,decorations.markings,arrows.meta}
+\tikzset{
+  ferm/.style={draw,thick,postaction=decorate,decoration={markings,
+    mark=at position 0.56 with {\arrow{Stealth[length=1.7mm]}}}},
+  boson/.style={draw,thick,decorate,decoration={snake,amplitude=1.1pt,segment length=5pt}},
+  gluon/.style={draw,thick,decorate,decoration={coil,aspect=0.5,amplitude=2.2pt,segment length=4.5pt}},
+  scal/.style={draw,thick,dashed},
+  llp/.style={draw,thick,double,double distance=1.4pt},
+  susy/.style={red!80!black},
+  sferm/.style={ferm,susy},
+  sscal/.style={scal,susy},
+  sllp/.style={llp,susy},
+  lab/.style={font=\footnotesize},
+  slab/.style={font=\footnotesize,text=red!80!black},
+}
+\begin{document}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+"""
+TIKZ_FOOTER = "\n\\end{tikzpicture}\n\\end{document}\n"
+
+
+def _tikz(boson, up, dn, decays, isr=False, note=""):
+    """Assemble a diagram: production boson, the two produced inos (up/dn =
+    (style, label)), and a class-specific `decays` snippet."""
+    p = []
+    p.append(r"\coordinate(q1)at(-3.6,1.0);\coordinate(q2)at(-3.6,-1.0);"
+             r"\coordinate(va)at(-2.1,0);\coordinate(vb)at(-0.8,0);"
+             r"\coordinate(u)at(0.9,1.15);\coordinate(d)at(0.9,-1.15);")
+    p.append(r"\draw[ferm](q1)--(va);\draw[ferm](q2)--(va);"
+             r"\node[lab,left]at(q1){$q$};\node[lab,left]at(q2){$\bar q$};")
+    if isr:
+        # emit the ISR gluon from a point that lies ON the q1--va line
+        # (q1=(-3.6,1.0), va=(-2.1,0); at x=-3.0 the line is at y=0.6)
+        p.append(r"\fill(-3.0,0.6)circle(1.1pt);"
+                 r"\draw[gluon](-3.0,0.6)--(-3.55,1.85) node[lab,above]{ISR jet};")
+    p.append(r"\draw[boson](va)--(vb) node[lab,midway,above]{%s};" % boson)
+    p.append(r"\draw[%s](vb)--(u) node[slab,midway,above left]{%s};" % up)
+    p.append(r"\draw[%s](vb)--(d) node[slab,midway,below left]{%s};" % dn)
+    p.append(decays)
+    if note:
+        p.append(r"\node[lab]at(0.1,-3.0){%s};" % note)
+    return "\n".join(p)
+
+
+def _compressed(lsp):
+    decays = (r"\draw[boson](u)--(2.5,2.3) node[lab,right]{$Z^{*}\!\to f\bar f$ (soft)};"
+              r"\draw[sferm](u)--(3.0,1.25) node[slab,right]{$\tilde\chi^0_1$};"
+              r"\draw[boson](d)--(2.5,-2.3) node[lab,right]{$W^{*}\!\to f\bar f'$ (soft)};"
+              r"\draw[sferm](d)--(3.0,-1.25) node[slab,right]{$\tilde\chi^0_1$};")
+    return _tikz(r"$W^{*}$", ("sferm", r"$\tilde\chi^0_2$"), ("sferm", r"$\tilde\chi^\pm_1$"),
+                 decays, isr=True, note=r"compressed %s: $\Delta m\sim$ few GeV" % lsp)
+
+
+_WZ = _tikz(r"$W^{*}$", ("sferm", r"$\tilde\chi^0_2$"), ("sferm", r"$\tilde\chi^\pm_1$"),
+            r"\draw[boson](u)--(2.6,2.4) node[lab,right]{$Z$};"
+            r"\draw[sferm](u)--(3.0,1.25) node[slab,right]{$\tilde\chi^0_1$};"
+            r"\draw[boson](d)--(2.6,-2.4) node[lab,right]{$W^\pm$};"
+            r"\draw[sferm](d)--(3.0,-1.25) node[slab,right]{$\tilde\chi^0_1$};")
+
+_WH = _tikz(r"$W^{*}$", ("sferm", r"$\tilde\chi^0_2$"), ("sferm", r"$\tilde\chi^\pm_1$"),
+            r"\draw[scal](u)--(2.35,2.25) node[lab,midway,above]{$h$};"
+            r"\draw[ferm](2.35,2.25)--(3.35,2.75) node[lab,right]{$b$};"
+            r"\draw[ferm](2.35,2.25)--(3.35,1.85) node[lab,right]{$\bar b$};"
+            r"\draw[sferm](u)--(3.0,0.95) node[slab,right]{$\tilde\chi^0_1$};"
+            r"\draw[boson](d)--(2.6,-2.4) node[lab,right]{$W^\pm$};"
+            r"\draw[sferm](d)--(3.0,-1.25) node[slab,right]{$\tilde\chi^0_1$};")
+
+_LLP = _tikz(r"$W^{*}$", ("sllp", r"$\tilde\chi^\pm_1$"), ("sferm", r"$\tilde\chi^0_1$"),
+             r"\draw[ferm](u)--(2.7,1.85) node[lab,right]{$\pi^\pm$ (soft)};"
+             r"\draw[sferm](u)--(3.0,0.85) node[slab,right]{$\tilde\chi^0_1$};"
+             r"\node[lab]at(0.95,1.62){disappears};",
+             isr=True, note=r"long-lived $\tilde\chi^\pm_1$: $\Delta m\lesssim m_\pi$")
+
+_SLEP = _tikz(r"$W^{*}$", ("sferm", r"$\tilde\chi^0_2$"), ("sferm", r"$\tilde\chi^\pm_1$"),
+              r"\draw[ferm](u)--(1.9,2.25) node[lab,right]{$\ell$};"
+              r"\draw[sscal](u)--(2.25,0.5) node[slab,midway,above right]{$\tilde\ell$};"
+              r"\draw[ferm](2.25,0.5)--(3.3,1.05) node[lab,right]{$\ell$};"
+              r"\draw[sferm](2.25,0.5)--(3.3,-0.1) node[slab,right]{$\tilde\chi^0_1$};"
+              r"\draw[boson](d)--(2.6,-2.4) node[lab,right]{$W^\pm$};"
+              r"\draw[sferm](d)--(3.0,-1.25) node[slab,right]{$\tilde\chi^0_1$};")
+
+_STAU = _tikz(r"$W^{*}$", ("sferm", r"$\tilde\chi^0_2$"), ("sferm", r"$\tilde\chi^\pm_1$"),
+              r"\draw[ferm](u)--(1.9,2.25) node[lab,right]{$\tau$};"
+              r"\draw[sscal](u)--(2.25,0.5) node[slab,midway,above right]{$\tilde\tau$};"
+              r"\draw[ferm](2.25,0.5)--(3.3,1.05) node[lab,right]{$\tau$};"
+              r"\draw[sferm](2.25,0.5)--(3.3,-0.1) node[slab,right]{$\tilde\chi^0_1$};"
+              r"\draw[boson](d)--(2.6,-2.4) node[lab,right]{$W^\pm$};"
+              r"\draw[sferm](d)--(3.0,-1.25) node[slab,right]{$\tilde\chi^0_1$};")
+
+_HEAVY = _tikz(r"$\gamma^{*}/Z^{*}$", ("sferm", r"$\tilde\chi_i$"), ("sferm", r"$\tilde\chi_j$"),
+               r"\draw[sferm](u)--(3.0,1.5) node[slab,right]{decays};"
+               r"\draw[sferm](d)--(3.0,-1.5) node[slab,right]{decays};",
+               note=r"heavy EW-inos, just beyond current reach")
+
+CLASS_TIKZ = {
+    "WZ-onshell-multilepton": _WZ,
+    "Wh-1Lbb": _WH,
+    "WZ-offshell-soft": _compressed(r"off-shell $WZ$"),
+    "compressed-higgsino": _compressed("higgsino"),
+    "compressed-wino": _compressed("wino"),
+    "compressed-mixed": _compressed("bino/coann."),
+    "LLP-disappearing-track": _LLP,
+    "slepton-multilepton": _SLEP,
+    "slepton-multilepton-stau": _STAU,
+    "heavy-other": _HEAVY,
+}
+
+
+def render_diagram(cls, outdir):
+    """Write <cls>.tex, compile to PDF (tectonic) and rasterise to PNG (pdftoppm).
+    Returns the PNG basename. Raises on failure -- the toolchain is guaranteed by
+    the pixi env, so a failure is a real error, not something to skip.
+    (tectonic is self-contained: it fetches tikz/pgf/standalone on first use and
+    caches them; it leaves no .aux/.log to clean up.)"""
+    if cls not in CLASS_TIKZ:
+        return None
+    with open(os.path.join(outdir, f"{cls}.tex"), "w") as fh:
+        fh.write(TIKZ_HEADER + CLASS_TIKZ[cls] + TIKZ_FOOTER)
+    r = subprocess.run(["tectonic", "--chatter", "minimal", f"{cls}.tex"],
+                       cwd=outdir, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"tectonic failed for {cls}:\n{r.stderr[-2500:]}")
+    subprocess.run(["pdftoppm", "-png", "-r", "150", "-singlefile", f"{cls}.pdf", cls],
+                   cwd=outdir, check=True)
+    return f"{cls}.png"
+
 
 def scan_of(path):
     return os.path.basename(os.path.dirname(path))
@@ -83,6 +237,7 @@ def scan_of(path):
 proj = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.projected}   # noqa: F821
 tgts = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.targets}     # noqa: F821
 holes = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.holes}      # noqa: F821
+sens = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.sensitivity}  # noqa: F821
 plots = {scan_of(p): p for p in snakemake.input.plots}                       # noqa: F821
 
 REQ = "+".join(cfg.get("require_constraints", []) or ["none"])
@@ -97,6 +252,66 @@ if len(summary):
     summary = summary.sort_values("total", ascending=False)
 summary.to_csv(snakemake.output.class_summary)               # noqa: F821
 
+all_h = pd.concat(holes.values(), ignore_index=True) if holes else pd.DataFrame()
+ordered = list(summary.index) if len(summary) else []
+hole_classes = (all_h["phys_class"].value_counts().index.tolist() if len(all_h) else [])
+
+# ---- render diagrams + extract representative SLHA for the present classes ----
+repdir = snakemake.output.representatives                     # noqa: F821
+os.makedirs(repdir, exist_ok=True)
+present = list(dict.fromkeys(ordered + hole_classes))         # union, target order first
+
+DIA = {}                                                      # phys_class -> png basename
+for cls in present:
+    png = render_diagram(cls, repdir)
+    if png:
+        DIA[cls] = png
+print(f"rendered {len(DIA)} diagrams for classes: {sorted(DIA)}")
+
+# representative model per (role, class): target = most reachable; hole = lightest
+REP = {}                                                      # (role, cls) -> row (Series)
+for cls in ordered:
+    sub = all_t[all_t["phys_class"] == cls]
+    if len(sub):
+        REP[("target", cls)] = sub.sort_values("exp_min_proj").iloc[0]
+for cls in hole_classes:
+    sub = all_h[all_h["phys_class"] == cls]
+    if len(sub):
+        REP[("hole", cls)] = sub.sort_values("m_light_ewk").iloc[0]
+
+# extract each representative's spectrum from its tarball (one pass per tarball)
+SLHA = {}                                                     # (role, cls) -> slha filename
+if "slha_path" in all_t.columns or "slha_path" in all_h.columns:
+    wanted = {}                                               # scan -> {member_path: out_name}
+    for (role, cls), r in REP.items():
+        out = f"{role}__{cls}__{r['scan']}_{int(r['model_number'])}.slha"
+        wanted.setdefault(r["scan"], {})[r["slha_path"]] = out
+        SLHA[(role, cls)] = out
+    for scan, mapping in wanted.items():
+        tarpath = cfg["scans"][scan]["slha_tarball"]
+        with tarfile.open(tarpath, "r:gz") as tf:
+            for m in tf:
+                if m.name in mapping:
+                    with open(os.path.join(repdir, mapping[m.name]), "wb") as fh:
+                        fh.write(tf.extractfile(m).read())
+
+# manifest tying class -> diagram + representative model + spectrum
+man = []
+for (role, cls), r in REP.items():
+    man.append({"role": role, "phys_class": cls, "scan": r["scan"],
+                "model_number": int(r["model_number"]),
+                "m_chi1": round(float(r["m_n1"]), 1), "m_chi2": round(float(r["m_n2"]), 1),
+                "m_char1": round(float(r["m_c1"]), 1), "dm_n2n1": round(float(r["dm_n2n1"]), 2),
+                "lsp_type": r["lsp_type"], "diagram": DIA.get(cls, ""),
+                "slha_file": SLHA.get((role, cls), "")})
+pd.DataFrame(man).to_csv(os.path.join(repdir, "MANIFEST.csv"), index=False)
+
+
+def reprel(name):
+    """path of a representatives/ file, relative to the report's directory"""
+    return os.path.join(os.path.relpath(repdir, os.path.dirname(snakemake.output.report)), name)  # noqa: F821
+
+
 # ---- build markdown ----
 md = []
 md.append("# Run-3 EWK SUSY search targets from the ATLAS pMSSM scan\n")
@@ -104,32 +319,56 @@ md.append(f"_Data: ATLAS pMSSM electroweak scan, arXiv:2402.01392. "
           f"Projection: `{cfg.get('projection', 'sqrtL')}` scaling of expected significance from "
           f"{L0:.0f} fb$^{{-1}}$ to **{L:.0f} fb$^{{-1}}$** (Run 2+3 combined). "
           f"CLs exclusion threshold {cfg['cls_threshold']}. "
-          f"External constraints required to pass: **{REQ}** "
-          f"(ATLAS flags, 0 = excluded; DM left optional as cosmology-dependent)._\n")
+          f"A viable target must, on top of the ATLAS collider exclusion, pass the external "
+          f"constraints **{REQ}** (ATLAS flags, 0 = excluded)._\n")
 
 md.append("## Definition of a target\n")
 md.append("A model is a **Run-3 target** if it is:\n\n"
           "1. **not excluded now** (observed): min over all channels of `ObsCLs` >= 0.05;\n"
           "2. **not even expected to be excluded now**: min over the 8 recastable searches "
           "of `ExpCLs` >= 0.05;\n"
-          "3. **expected to be reached at the target luminosity**: projected min `ExpCLs` < 0.05.\n\n"
-          "This isolates parameter space that today's searches genuinely do not reach, "
+          "3. **expected to be reached at the target luminosity**: projected min `ExpCLs` < 0.05;\n"
+          f"4. **viable**: passes the required external constraints (`{REQ}`).\n\n"
+          "This isolates viable parameter space that today's searches genuinely do not reach, "
           "but where Run-3 statistics are expected to gain sensitivity.\n")
 
+md.append("## Method: luminosity scaling\n")
+md.append(
+    f"Each of the 8 recastable searches reports an **expected CLs** at the baseline "
+    f"{L0:.0f} fb⁻¹. It is extrapolated to {L:.0f} fb⁻¹ in three steps (per analysis, per model):\n\n"
+    "1. **CLs → significance** (treat expected CLs as a one-sided Gaussian p-value):\n"
+    "   `Z = Φ⁻¹(1 − ExpCLs)`  — the exclusion line `CLs = 0.05` is `Z = 1.645`.\n"
+    "2. **scale the significance with luminosity:**  `Z(L) = Z · scale`.\n"
+    f"   For `projection: {cfg.get('projection', 'sqrtL')}`, "
+    + (f"`scale = √(L/L₀) = √({L:.0f}/{L0:.0f}) = {SCALE:.3f}`"
+       if cfg.get('projection', 'sqrtL') == 'sqrtL'
+       else f"`scale = √(L/L₀)/√(1+f(L/L₀−1)) = {SCALE:.3f}` (f = {cfg.get('systematics_fraction', 0.30)})")
+    + ".\n"
+    "3. **significance → projected CLs:**  `ExpCLs(L) = Φ(−Z(L))`.\n\n"
+    "The model's projected sensitivity is the **minimum** projected `ExpCLs` over the 8 analyses; "
+    "if it falls below 0.05 the model is *projected-excluded*. The **expected** CLs is scaled (not the "
+    "observed) because it reflects sensitivity (S, B) rather than the data fluctuation.\n\n"
+    "`√L` is the **statistics-limited** scaling (S/√B with S,B ∝ L). It is optimistic; the "
+    "`sqrtL_syst` option saturates the gain to model a systematics floor.\n\n"
+    f"**Consequence.** A model newly crosses the threshold at {L:.0f} fb⁻¹ when its *current* expected "
+    f"CLs lies between **{THR:.2f}** (already expected-excluded below that, hence filtered out) and "
+    f"**{BAND_HI:.2f}** = `1 − Φ(1.645/{SCALE:.3f})`. "
+    f"_Worked example:_ ExpCLs_now = {EX_NOW:.2f} → Z = {ndtri(1-EX_NOW):.3f} → "
+    f"Z(L) = {ndtri(1-EX_NOW)*SCALE:.3f} → ExpCLs(L) = {EX_PROJ:.3f} (< 0.05 ⇒ target).\n")
+
 md.append("## Headline numbers\n")
-md.append("Target counts at three levels of external-constraint stringency. Applying the "
-          "external constraints matters a lot — the collider-only count is dominated by models "
-          "that other measurements already disfavour.\n")
-md.append(f"| Scan | Total | Excluded now | Collider-only targets | + {REQ} (reported) | + DM too |")
+md.append("Target counts at increasing external-constraint stringency, to show the effect of each cut. "
+          f"**The imposed (reported) requirement is `{REQ}`** — that column is the headline.\n")
+md.append("| Scan | Total | Excluded now | Collider-only | + EW+Flavour | + EW+Flavour+DM |")
 md.append("|---|---:|---:|---:|---:|---:|")
 for scan, d in proj.items():
     n_coll = int(d.is_target_collider.sum())
-    n_req = int(d.is_target.sum())
-    n_dm = int((d.is_target_collider & d.pass_required & d.pass_DM).sum())
-    md.append(f"| {scan} | {len(d)} | {int(d.obs_excluded_now.sum())} | "
-              f"{n_coll} | {n_req} | {n_dm} |")
-md.append("\n_\"+ DM too\" additionally requires the dark-matter constraint (relic density + direct "
-          "detection) to pass; it is the most model-dependent and shrinks the set the most._\n")
+    n_ewf = int((d.is_target_collider & d.pass_EW & d.pass_Flavour).sum())
+    n_all = int((d.is_target_collider & d.pass_EW & d.pass_Flavour & d.pass_DM).sum())
+    md.append(f"| {scan} | {len(d)} | {int(d.obs_excluded_now.sum())} | {n_coll} | {n_ewf} | {n_all} |")
+md.append("\n_The dark-matter constraint (relic density + direct detection) is the most model-dependent "
+          "and removes the most models; the relic-density part assumes the LSP is all of dark matter under "
+          "standard cosmology._\n")
 
 # ---- class x scan table ----
 md.append("## Target classes (class x scan)\n")
@@ -145,7 +384,9 @@ md.append("")
 ordered = list(summary.index) if len(summary) else []
 md.append(f"## The classes ({len(ordered)} populated)\n")
 md.append("Each class below is an interesting target for a (dedicated or extended) "
-          "Run-3 search: currently allowed, but projected to be reachable.\n")
+          "Run-3 search: currently allowed, but projected to be reachable. The production+decay "
+          "**Feynman diagram** and a **representative SLHA spectrum** for each class are saved under "
+          "[`representatives/`](representatives/) (see `representatives/MANIFEST.csv`).\n")
 
 for i, cls in enumerate(ordered, 1):
     title, physics, sig, search = CLASS_META.get(
@@ -172,6 +413,10 @@ for i, cls in enumerate(ordered, 1):
             else:
                 vals.append(str(v))
         md.append("  | " + " | ".join(vals) + " |")
+    if cls in DIA:
+        md.append(f"\n  **Topology (representative target):**\n\n  ![{cls} Feynman diagram]({reprel(DIA[cls])})\n")
+    if ("target", cls) in SLHA:
+        md.append(f"  Representative spectrum: [`{SLHA[('target', cls)]}`]({reprel(SLHA[('target', cls)])})\n")
     md.append("")
 
 # ---- designed-but-empty classes ----
@@ -183,13 +428,19 @@ if empty:
               + ", ".join(f"`{c}`" for c in empty) + ".\n")
 
 # ---- coverage holes -------------------------------------------------
-all_h = pd.concat(holes.values(), ignore_index=True) if holes else pd.DataFrame()
-md.append("## Coverage holes — gaps that need fixing ASAP\n")
-md.append(f"A **hole** is a model that is _viable_ (passes {REQ}), _light_ "
-          f"(min(m_χ₁±, m_χ₂⁰) ≤ {cfg['hole_mass_max_gev']:.0f} GeV, so copiously produced) "
-          f"yet _invisible_ to the whole programme (min expected CLs ≥ {cfg['hole_expcls_min']}). "
-          "Because there is essentially **no** expected sensitivity, the √L projection does not help "
-          "— these need a **new or re-optimised search**, not just more luminosity.\n")
+md.append("## Coverage holes — gaps a new search should cover\n")
+_excl = cfg.get("hole_exclude_classes", []) or []
+md.append(
+    f"A **hole** is a model that is _viable_ (passes {REQ}), _invisible_ to the whole programme "
+    f"(min expected CLs ≥ {cfg['hole_expcls_min']} across the 8 recastable searches), and "
+    f"_reachable in principle_ by a **dedicated** Run-3 search — enough EW-ino signal is produced at "
+    f"{L:.0f} fb⁻¹ that a dedicated analysis could plausibly exploit it "
+    f"(N = σ(m,mode)·L ≥ {int(cfg['hole_min_run3_events'])} events; σ from approximate 13 TeV NLO+NLL "
+    f"curves, so winos reach higher mass than higgsinos). The √L projection of the *existing* searches "
+    f"does not help (CLs ≈ 1 stays ≈ 1) — these need a **new or re-optimised search**, not more luminosity."
+    + (f"\n\n_Excluded by construction: `{', '.join(_excl)}` — the disappearing-track signature already "
+       f"has a dedicated ATLAS search (observed-only here, so this √L study cannot project it, but it is "
+       f"not a gap needing a *new* search)._\n" if _excl else "\n"))
 if len(all_h):
     md.append("| Scan | Holes | Lumi-fixable @ target L | also DM-allowed | dominant LSP | dominant class |")
     md.append("|---|---:|---:|---:|---|---|")
@@ -202,12 +453,14 @@ if len(all_h):
         md.append(f"| {scan} | {len(h)} | {int(h.lumi_fixable.sum())} | {int(h.pass_DM.sum())} | "
                   f"`{dom_lsp}` | `{dom_cls}` |")
     md.append("")
+    mlo, mhi = all_h["m_light_ewk"].min(), all_h["m_light_ewk"].max()
     md.append(f"**Take-away:** the holes are overwhelmingly **compressed spectra** "
-              f"(near-degenerate χ with Δm of order a few GeV → decay products too soft to trigger/select). "
-              f"In the EWKino scan they are dominated by **compressed higgsinos**; in Bino-DM by "
-              f"**compressed binos** (coannihilation region). None are fixed by Run-3 luminosity.\n")
+              f"(near-degenerate χ with Δm of order a few GeV → decay products too soft to trigger/select), "
+              f"spanning m(χ₁±/χ₂⁰) ≈ {mlo:.0f}–{mhi:.0f} GeV. In the EWKino scan they are dominated by "
+              f"**compressed higgsinos**; in Bino-DM by **compressed binos** (coannihilation region). "
+              f"None are fixed by Run-3 luminosity — all need a dedicated soft-object + ISR search.\n")
     bcols = ["scan", "model_number", "m_n1", "m_light_ewk", "dm_n2n1",
-             "lsp_type", "phys_class", "exp_min_now", "pass_DM"]
+             "lsp_type", "n_run3", "exp_min_now", "pass_DM"]
     bcols = [c for c in bcols if c in all_h.columns]
     bench = all_h.sort_values("m_light_ewk").head(8)
     md.append("Lightest holes (most copiously produced, hence most urgent):\n")
@@ -217,8 +470,55 @@ if len(all_h):
         md.append("| " + " | ".join(f"{r[c]:.3g}" if isinstance(r[c], float) else str(r[c])
                                     for c in bcols) + " |")
     md.append("")
+    # per-hole-class topology + representative spectrum
+    md.append("### Hole topologies & representative spectra\n")
+    for cls in hole_classes:
+        title = CLASS_META.get(cls, (cls,))[0]
+        n = int((all_h["phys_class"] == cls).sum())
+        md.append(f"**{title}** &nbsp; `({cls})` — {n} holes")
+        if cls in DIA:
+            md.append(f"\n![{cls} Feynman diagram]({reprel(DIA[cls])})\n")
+        if ("hole", cls) in SLHA:
+            md.append(f"Representative spectrum: [`{SLHA[('hole', cls)]}`]({reprel(SLHA[('hole', cls)])})\n")
+    md.append("")
 else:
     md.append("_No holes found at the configured thresholds._\n")
+
+# ---- toy search-design sensitivity --------------------------------
+all_s = pd.concat(sens.values(), ignore_index=True) if sens else pd.DataFrame()
+md.append("## Designing a search for the compressed-higgsino holes\n")
+md.append("The dominant holes are compressed higgsinos/binos. A **dedicated soft opposite-sign dilepton "
+          "+ ISR-jet + Eᵀmiss search** targets them; the full analysis design (trigger, soft-lepton "
+          "reconstruction, discriminating variables, backgrounds, control/validation regions, "
+          "interpretation) is written up in [`docs/search_design.md`](../docs/search_design.md).\n")
+_fig = "figures/EWKino770_target.png"
+if os.path.exists(_fig):
+    md.append(f"Benchmark topology (EWKino 770):\n\n![EWKino 770 target diagram]({os.path.join('..', _fig)})\n")
+
+if len(all_s):
+    sc = cfg["sensitivity"]
+    md.append(f"\n### Toy sensitivity at {L:.0f} fb⁻¹ (illustrative — not a simulation)\n")
+    md.append(f"**Independent** benchmark study (config `sensitivity.models`, off the parsed spectra — "
+              f"not the target/hole classification). Parametrised cut-and-count: S = σ·L·ε(Δm)·BR(χ̃₁±→ℓ)², "
+              f"ε plateau {sc['eff_plateau']}, background {sc['bkg_ref_events']:.0f}·(L/{sc['bkg_ref_lumi_fb']:.0f}) "
+              f"events, {int(100*sc['bkg_syst_frac'])}% syst; expected-excludable at Z ≥ {sc['excl_significance']}.\n")
+    cols = ["scan", "model_number", "lsp_type", "m_n1", "dm_n2n1", "br_c1_lep",
+            "xsec_fb", "eff", "S", "B", "Z_excl", "excludable"]
+    cols = [c for c in cols if c in all_s.columns]
+    order = all_s.assign(_k=(all_s["model_number"] != 770).astype(int)).sort_values(
+        ["_k", "Z_excl"], ascending=[True, False])
+    md.append("| " + " | ".join(cols) + " |")
+    md.append("|" + "---|" * len(cols))
+    for _, r in order.iterrows():
+        md.append("| " + " | ".join(f"{r[c]:.3g}" if isinstance(r[c], float) else str(r[c])
+                                    for c in cols) + " |")
+    n_b, n_exc = len(all_s), int(all_s["excludable"].sum())
+    b770 = all_s[(all_s.scan == "EWKino") & (all_s.model_number == 770)]
+    v = (f" **EWKino 770**: {'excludable' if bool(b770['excludable'].iloc[0]) else 'NOT excludable'} at "
+         f"Z = {float(b770['Z_excl'].iloc[0]):.1f}." if len(b770) else "")
+    md.append(f"\n**Verdict:** of the {n_b} hand-selected benchmarks, **{n_exc} are projected excludable** by "
+              f"the dedicated search under these (optimistic) assumptions.{v} ε(Δm) and the background are "
+              f"`config.yaml` knobs — read this as a *relative* plausibility check, not a real limit.\n")
 
 md.append("## Figures\n")
 for scan, p in plots.items():
@@ -234,9 +534,10 @@ md.append(f"- This run used `projection: {cfg.get('projection', 'sqrtL')}`. `sqr
           "new/optimised search could do better than this proxy.\n"
           "- Decay-mode flags (WZ vs Wh vs slepton) use the **dominant** branching ratio "
           "from the SLHA decay tables, not a full final-state simulation.\n"
-          "- External constraints use the ATLAS-provided flags (0 = excluded). EW + Flavour are "
-          "imposed by default; DM (relic density + direct detection) is reported but not imposed, "
-          "as the relic-density requirement is cosmology-dependent.\n")
+          f"- External constraints use the ATLAS-provided flags (0 = excluded); the imposed set is "
+          f"`{REQ}`. The DM constraint's relic-density part is cosmology-dependent (assumes the LSP is "
+          "all of dark matter under standard cosmology), so the headline table also shows the looser "
+          "tiers.\n")
 
 with open(snakemake.output.report, "w") as fh:                # noqa: F821
     fh.write("\n".join(md) + "\n")

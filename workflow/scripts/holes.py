@@ -1,46 +1,73 @@
-"""Find coverage HOLES in the ATLAS programme: viable, light models that no search
-even *expects* to constrain -- gaps that more luminosity cannot fix.
+"""Find coverage HOLES: viable, currently-invisible models that a *dedicated* Run-3
+search COULD reach, but for which no existing search even expects sensitivity.
 
-A model is a hole if it is, simultaneously:
-  * not excluded now (observed),
-  * viable: passes the required external constraints (EW, Flavour, ...),
-  * copiously produced: min(m_chargino1, m_chi2) <= hole_mass_max_gev,
-  * invisible to the programme: min expected CLs >= hole_expcls_min
-    (so even the most sensitive search expects essentially no power).
+A model is a hole if, simultaneously:
+  * not excluded now (observed);
+  * viable: passes the required external constraints (EW, Flavour, DM);
+  * invisible to the programme: min expected CLs over the 8 recastable searches
+    >= hole_expcls_min (even the most sensitive expects ~no power);
+  * reachable in principle: enough EW-ino signal is produced at the target
+    luminosity that a dedicated search could plausibly exploit it,
+    N = sigma(m, mode) * target_lumi  >=  hole_min_run3_events;
+  * not in `hole_exclude_classes` -- e.g. the disappearing-track signature, which
+    already has a dedicated (observed-only) ATLAS search, so it is not a gap that
+    needs a *new* search.
 
-For these the √L projection does NOT help (a CLs ~ 1 stays ~ 1), so we also report
-`lumi_fixable` = whether the target-luminosity projection would reach it (almost
-never, by construction). Holes are ranked by how light they are (severity).
+The reachability gate replaces a flat mass cap: because winos have a ~3x larger
+production cross-section than higgsinos, they count as reachable out to higher
+mass at the same event threshold.
+
+`lumi_fixable` records whether the plain sqrt-L projection of the *existing* searches
+would reach it (essentially never, by construction -- that is the point of a hole).
 """
+import numpy as np
 import pandas as pd
 
 df = pd.read_parquet(snakemake.input[0])                      # noqa: F821
 cfg = snakemake.config                                        # noqa: F821
 scan = snakemake.wildcards.scan                               # noqa: F821
 
-MMAX = float(cfg["hole_mass_max_gev"])
 ECUT = float(cfg["hole_expcls_min"])
+NMIN = float(cfg["hole_min_run3_events"])
+LUMI = float(cfg["target_lumi_fb"])
+EXCLUDE = set(cfg.get("hole_exclude_classes", []) or [])
+
+# Approximate 13 TeV EW-ino cross-sections live in config (shared with sensitivity.py).
+# Used here ONLY as a reachability gate -- not for limit setting. mass [GeV] -> sigma [fb].
+_XS = cfg["xsec_13tev_fb"]
+
+
+def xsec_fb(mass, mode):
+    pts = _XS["wino" if mode == "wino" else "higgsino"]   # bino/mixed -> higgsino (conservative)
+    xm = np.log([m for m, _ in pts])
+    ys = np.log([s for _, s in pts])
+    return float(np.exp(np.interp(np.log(max(mass, 1.0)), xm, ys)))
+
+
+df["xsec_fb"] = [xsec_fb(m, l) for m, l in zip(df["m_light_ewk"], df["lsp_type"])]
+df["n_run3"] = df["xsec_fb"] * LUMI
 
 mask = (
     (~df["obs_excluded_now"])
     & df["pass_required"]
-    & (df["m_light_ewk"] <= MMAX)
     & (df["exp_min_now"] >= ECUT)
+    & (df["n_run3"] >= NMIN)
+    & (~df["phys_class"].isin(EXCLUDE))
 )
 holes = df[mask].copy()
-holes["lumi_fixable"] = holes["proj_excluded"]      # would the target lumi reach it?
+holes["lumi_fixable"] = holes["proj_excluded"]
 holes["scan"] = scan
-holes = holes.sort_values("m_light_ewk")            # lightest = most egregious
+holes = holes.sort_values("m_light_ewk")
 
-# summary by physics class and LSP type
 by_class = holes.groupby("phys_class").size().rename("n").reset_index()
 by_lsp = holes.groupby("lsp_type").size().rename("n").reset_index()
 
-print(f"[{scan}] HOLES: {len(holes)} "
-      f"(m_light<= {MMAX:.0f} GeV, ExpCLs>= {ECUT}, constraint-passing)")
-print(f"[{scan}]   lumi-fixable at target L: {int(holes.lumi_fixable.sum())} / {len(holes)}")
-print(f"[{scan}]   also DM-allowed: {int((holes.pass_DM).sum())}")
+print(f"[{scan}] HOLES: {len(holes)} (ExpCLs>= {ECUT}, N_run3>= {NMIN:.0f} @ {LUMI:.0f} fb-1, "
+      f"viable, excl {sorted(EXCLUDE)})")
+print(f"[{scan}]   lumi-fixable: {int(holes.lumi_fixable.sum())}/{len(holes)}   "
+      f"DM-allowed: {int(holes.pass_DM.sum())}/{len(holes)}")
 if len(holes):
+    print(f"[{scan}]   m_light range: {holes.m_light_ewk.min():.0f}-{holes.m_light_ewk.max():.0f} GeV")
     print(f"[{scan}]   by LSP: {by_lsp.set_index('lsp_type')['n'].to_dict()}")
     print(f"[{scan}]   by class: {by_class.set_index('phys_class')['n'].to_dict()}")
 

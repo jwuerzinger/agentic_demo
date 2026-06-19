@@ -35,8 +35,10 @@ rule all:
         "results/report.md",
         "results/class_summary.csv",
         "results/validation.txt",
+        directory("results/representatives"),
         expand("results/{scan}/targets.parquet", scan=SCANS),
         expand("results/{scan}/holes.parquet", scan=SCANS),
+        expand("results/{scan}/sensitivity.parquet", scan=SCANS),
         expand("results/{scan}/mass_plane.png", scan=SCANS),
 
 
@@ -63,12 +65,18 @@ rule parse_slha:
         "scripts/parse_slha.py"
 
 
+# NOTE: scripts read `snakemake.config` directly, which Snakemake does NOT track as a
+# rerun trigger. Declaring `params: cfg=config` makes any config.yaml edit re-run these
+# (fast) rules via the params trigger. parse_slha is deliberately excluded so config
+# tweaks don't force the expensive ~21k-file re-parse.
 rule merge_exclusion:
     input:
         features="results/{scan}/features.parquet",
         csv=lambda wc: config["scans"][wc.scan]["exclusion_csv"],
     output:
         "results/{scan}/merged.parquet",
+    params:
+        cfg=config,
     script:
         "scripts/merge.py"
 
@@ -78,6 +86,8 @@ rule project:
         "results/{scan}/merged.parquet",
     output:
         "results/{scan}/projected.parquet",
+    params:
+        cfg=config,
     script:
         "scripts/project.py"
 
@@ -89,6 +99,8 @@ rule classify:
         classified="results/{scan}/classified.parquet",
         targets="results/{scan}/targets.parquet",
         summary="results/{scan}/class_counts.csv",
+    params:
+        cfg=config,
     script:
         "scripts/classify.py"
 
@@ -99,15 +111,35 @@ rule holes:
     output:
         holes="results/{scan}/holes.parquet",
         summary="results/{scan}/holes_counts.csv",
+    params:
+        cfg=config,
     script:
         "scripts/holes.py"
 
 
+rule sensitivity:
+    """Toy cut-and-count reach of a dedicated soft-dilepton + ISR search for HAND-SELECTED
+    benchmark models (config sensitivity.models; see docs/search_design.md). Independent of
+    the target/hole classification -- depends only on the parsed spectra. Not a simulation."""
+    input:
+        "results/{scan}/features.parquet",
+    output:
+        sensitivity="results/{scan}/sensitivity.parquet",
+        summary="results/{scan}/sensitivity_summary.csv",
+    params:
+        cfg=config,
+    script:
+        "scripts/sensitivity.py"
+
+
 rule plots:
     input:
-        "results/{scan}/projected.parquet",
+        projected="results/{scan}/projected.parquet",
+        holes="results/{scan}/holes.parquet",
     output:
         "results/{scan}/mass_plane.png",
+    params:
+        cfg=config,
     script:
         "scripts/plots.py"
 
@@ -118,10 +150,16 @@ rule report:
         targets=expand("results/{scan}/targets.parquet", scan=SCANS),
         counts=expand("results/{scan}/class_counts.csv", scan=SCANS),
         holes=expand("results/{scan}/holes.parquet", scan=SCANS),
+        sensitivity=expand("results/{scan}/sensitivity.parquet", scan=SCANS),
         plots=expand("results/{scan}/mass_plane.png", scan=SCANS),
+        # SLHA tarballs: report extracts a representative spectrum per class
+        tarballs=expand("data/{scan}_SLHA.tar.gz", scan=SCANS),
     output:
         report="results/report.md",
         class_summary="results/class_summary.csv",
+        representatives=directory("results/representatives"),
+    params:
+        cfg=config,
     script:
         "scripts/report.py"
 
@@ -131,7 +169,10 @@ rule validate:
         classified=expand("results/{scan}/classified.parquet", scan=SCANS),
         targets=expand("results/{scan}/targets.parquet", scan=SCANS),
         holes=expand("results/{scan}/holes.parquet", scan=SCANS),
+        sensitivity=expand("results/{scan}/sensitivity.parquet", scan=SCANS),
     output:
         "results/validation.txt",
+    params:
+        cfg=config,
     script:
         "scripts/validate.py"

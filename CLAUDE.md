@@ -34,8 +34,9 @@ observed-only. A model is excluded at 95% CL when its CLs `< 0.05`.
 
 **External-constraint flags** (`Constraints__Flavour/EW/DM`) use the convention **`0 = excluded, 1 = not
 excluded`** (Flavour: b→sγ, Bs→μμ, B→τν; EW: Δρ, m_W, Z→inv; DM: relic density + direct detection). These are
-*not* CLs — they are binary decisions. The study requires EW+Flavour to pass by default (`require_constraints`
-in config) and treats DM as optional (cosmology-dependent).
+*not* CLs — they are binary decisions. A model is "viable" only if **EW+Flavour+DM** all pass
+(`require_constraints` in config); the report still breaks counts down per tier (the DM relic-density part is
+cosmology-dependent, so the looser tiers stay visible).
 
 ## SLHA file format
 
@@ -99,13 +100,18 @@ whenever the workflow or its commands change (the README also embeds `docs/dag.p
 config/config.yaml      # ALL parameters (lumi, CLs threshold, projection, constraints, class & hole cuts)
 workflow/Snakefile      # the DAG (rule `download` is first; `rule all` must stay the top rule)
 workflow/scripts/        parse_slha -> merge -> project -> classify ; holes ; plots ; report ; validate
+                         #   sensitivity branches off parse_slha (independent benchmark study)
+docs/search_design.md   # written compressed-higgsino soft-dilepton+ISR search strategy
+figures/                # bespoke benchmark diagrams (e.g. EWKino770_target.*), not pipeline-generated
 data/                   # ATLAS inputs (fetched by `download`, git-ignored)
 docs/dag.png            # rendered rule graph (tracked, embedded in README)
 results/                # generated (per-scan parquet, plots, report.md, holes, validation.txt)
+results/representatives/ #   per-class TikZ Feynman diagrams + representative target/hole .slha + MANIFEST.csv
 ```
 
-Pipeline per scan: `download → parse_slha → merge_exclusion → project → classify` (+ `plots`, `holes`), then
-`report` + `validate` fan in all scans. Scripts use the Snakemake `script:` directive — they read the injected
+Pipeline per scan: `download → parse_slha → merge_exclusion → project → classify` (+ `plots`, `holes`); a
+separate `sensitivity` branch hangs off `parse_slha` (independent benchmark study); then `report` + `validate`
+fan in all scans. Scripts use the Snakemake `script:` directive — they read the injected
 `snakemake` object (`snakemake.input/output/params/config/wildcards`), not argparse. (The `download` rule uses
 `shell:` with `curl`; its output is `data/{fname}` with a `wildcard_constraints` on the known filenames.)
 
@@ -115,16 +121,33 @@ Pipeline per scan: `download → parse_slha → merge_exclusion → project → 
   (450): `Z = Φ⁻¹(1−ExpCLs)`, `Z(L) = Z·scale`, `ExpCLs(L) = Φ(−Z(L))`, where `scale = √(L/L₀)` for
   `projection: sqrtL` or a saturating factor for `projection: sqrtL_syst` (uses `systematics_fraction`). A
   **target** is *not excluded now* (observed and expected CLs ≥ 0.05), *projected-excluded* at the target lumi
-  (< 0.05), **and** passes `require_constraints` (EW+Flavour by default).
+  (< 0.05), **and** passes `require_constraints` (EW+Flavour+DM by default).
 - **`classify.py`** — bins targets into physics classes via interpretable cuts (LSP composition from `NMIX`,
   mass splittings, intermediate sleptons, chargino cτ); also writes the full `classified.parquet`.
-- **`holes.py`** — coverage holes: viable (constraint-passing), light (`min(m_χ1±,m_χ2) ≤ hole_mass_max_gev`),
-  *insensitive* (`min ExpCLs ≥ hole_expcls_min`) models. These are not luminosity-fixable. Result is dominated
-  by compressed higgsinos (EWKino) / compressed binos (Bino-DM).
+- **`holes.py`** — coverage holes: viable (constraint-passing), *insensitive* (`min ExpCLs ≥ hole_expcls_min`
+  over the 8 searches), and *reachable in principle* by a dedicated Run-3 search (produced yield
+  `N = σ(m,mode)·target_lumi ≥ hole_min_run3_events`, using an embedded approximate 13 TeV EW-ino
+  cross-section table — winos reach higher mass than higgsinos). Signatures with an existing dedicated search
+  (`hole_exclude_classes`, e.g. disappearing tracks — observed-only, not √L-projectable) are excluded. Not
+  luminosity-fixable. Dominated by compressed higgsinos (EWKino) / compressed binos (Bino-DM).
+- **`report.py`** — besides the markdown report, for each class present among targets ∪ holes it renders a
+  **plain-TikZ Feynman diagram** (compiled with `tectonic`, rasterised with `pdftoppm`) and extracts a
+  representative target/hole **SLHA spectrum** (via the `slha_path` column recorded by `parse_slha`) into
+  `results/representatives/` with a `MANIFEST.csv`. Diagrams use core pgf only (no `tikz-feynman`); `tectonic`
+  is self-contained (fetches its TeX bundle once, then caches), so a render failure is a real error.
+- **`sensitivity.py`** — TOY cut-and-count reach of a *dedicated* soft-dilepton + ISR search (design in
+  `docs/search_design.md`) for **hand-selected benchmark models** (`config["sensitivity"]["models"]`, default
+  EWKino 770/9030, Bino-DM 3766). **Independent study**: it reads `features.parquet` (parse_slha) and computes
+  Δm/m_light/lsp inline — it does *not* depend on classify/project/holes (see the DAG: it branches off
+  `parse_slha`). `S = σ·L·ε(Δm)·BR(χ̃₁±→ℓ)²`, `B` scaled from a reference SR yield, Asimov `Z` with a background
+  systematic; flags `excludable` (Z ≥ 1.64). Uses `br_c1_lep` (parse) + the shared `xsec_13tev_fb` table.
+  **Not a simulation** — `ε`/`B` are config knobs (order-of-magnitude, arXiv:1911.12606); *relative* reach only.
+  Current toy: EWKino 770 excludable at Z≈2.7.
 - **`validate.py`** — asserts pipeline invariants and fails the build on any violation.
 
-Current result: 6 populated target classes; ~250–310 constraint-passing targets per scan; ~216 (EWKino) + 13
-(Bino-DM) coverage holes (see `results/report.md`).
+Current result (require_constraints = EW+Flavour+DM): 88 viable targets (41 EWKino + 47 Bino-DM) in 6 populated
+classes; 409 (EWKino) + 140 (Bino-DM) coverage holes (m ≈ 100–550 GeV, reachability-gated), dominated by compressed higgsinos/binos (see
+`results/report.md`). Relaxing `require_constraints` to `[EW, Flavour]` raises the targets to 251 + 313.
 
 ### Gotchas
 
@@ -132,6 +155,10 @@ Current result: 6 populated target classes; ~250–310 constraint-passing target
   is **generated** — edit the scripts, never the outputs.
 - `rule all` must remain the first rule in the Snakefile (the `download` rule has wildcard output, so it cannot
   be the default target).
+- Editing `config/config.yaml` triggers re-runs **only** because the config-dependent rules declare
+  `params: cfg=config` (scripts read `snakemake.config`, which Snakemake does not otherwise track). If you add
+  a config-driven rule, give it `params: cfg=config` too — otherwise config edits silently won't re-run it.
+  `parse_slha` is intentionally exempt so config tweaks don't force the slow ~21k-file re-parse.
 - The `script:` paths in the Snakefile are relative to `workflow/`; `configfile`/`data/` paths are relative to
   the repo root (where you invoke `pixi run`).
 - `Constraints__*` are binary `0=excluded/1=not-excluded` flags, **not** CLs — never threshold them at 0.05.

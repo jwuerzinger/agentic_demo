@@ -1,0 +1,41 @@
+\documentclass[border=6pt]{standalone}
+\usepackage{tikz}\usepackage{amsmath}\usepackage{amssymb}
+\usetikzlibrary{decorations.pathmorphing,decorations.markings,arrows.meta}
+\tikzset{
+  ferm/.style={draw,thick,postaction=decorate,decoration={markings,
+    mark=at position 0.56 with {\arrow{Stealth[length=1.7mm]}}}},
+  boson/.style={draw,thick,decorate,decoration={snake,amplitude=1.1pt,segment length=5pt}},
+  gluon/.style={draw,thick,decorate,decoration={coil,aspect=0.5,amplitude=2.2pt,segment length=4.5pt}},
+  susy/.style={red!80!black},
+  sferm/.style={ferm,susy},
+  lab/.style={font=\footnotesize},
+  slab/.style={font=\footnotesize,text=red!80!black},
+}
+\begin{document}
+\begin{tikzpicture}[x=1cm,y=1cm,>=Stealth]
+  \coordinate (q1) at (-3.7,1.0); \coordinate (q2) at (-3.7,-1.0);
+  \coordinate (va) at (-2.2,0);   \coordinate (vb) at (-0.9,0);
+  \coordinate (u) at (0.7,1.15);  \coordinate (d) at (0.7,-1.15);
+  % initial state
+  \draw[ferm](q1)--(va); \draw[ferm](q2)--(va);
+  \node[lab,left] at (q1){$q$}; \node[lab,left] at (q2){$\bar q$};
+  % ISR gluon emitted from a point ON the q line (trigger + MET recoil)
+  \fill(-3.1,0.6) circle (1.1pt);
+  \draw[gluon](-3.1,0.6)--(-3.65,1.95) node[lab,above]{ISR jet \;(trigger, $E_T^{\mathrm{miss}}$ recoil)};
+  % Drell-Yan production of a chargino pair
+  \draw[boson](va)--(vb) node[lab,midway,above]{$\gamma^{*}/Z^{*}$};
+  \draw[sferm](vb)--(u) node[slab,midway,above left]{$\tilde\chi^+_1$};
+  \draw[sferm](vb)--(d) node[slab,midway,below left]{$\tilde\chi^-_1$};
+  % upper chargino: chi1+ -> chi10 ell+ nu   (BR ~35% to e/mu)
+  \draw[sferm](u)--(3.1,1.75) node[slab,right]{$\tilde\chi^0_1$};
+  \draw[ferm](u)--(2.55,2.45) node[lab,right]{$\ell^{+}$ (soft)};
+  \draw[ferm](u)--(3.1,0.7)  node[lab,right]{$\nu$};
+  % lower chargino: chi1- -> chi10 ell- nu
+  \draw[sferm](d)--(3.1,-1.75) node[slab,right]{$\tilde\chi^0_1$};
+  \draw[ferm](d)--(2.55,-2.45) node[lab,right]{$\ell^{-}$ (soft)};
+  \draw[ferm](d)--(3.1,-0.7)  node[lab,right]{$\nu$};
+  % captions
+  \node[lab] at (0.0,-3.1){EWKino 770: $m_{\tilde\chi^0_1}\!\approx\!183$ GeV higgsino, $\Delta m(\tilde\chi^\pm_1,\tilde\chi^0_1)\!\approx\!2.4$ GeV};
+  \node[lab] at (0.0,-3.55){\textbf{signature: ISR jet $+$ $E_T^{\mathrm{miss}}$ $+$ soft opposite-sign $\ell^+\ell^-$}};
+\end{tikzpicture}
+\end{document}

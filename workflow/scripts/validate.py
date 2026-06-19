@@ -1,6 +1,7 @@
 """Assert the pipeline's invariants so a re-run catches regressions automatically.
 Writes results/validation.txt and fails the build (raises) if any check fails.
 """
+import numpy as np
 import pandas as pd
 
 cfg = snakemake.config                                        # noqa: F821
@@ -14,12 +15,14 @@ def check(name, ok, detail=""):
         failures.append(f"{name}: {detail}")
 
 
-for clf_path, tgt_path, hole_path in zip(
-        snakemake.input.classified, snakemake.input.targets, snakemake.input.holes):  # noqa: F821
+for clf_path, tgt_path, hole_path, sens_path in zip(
+        snakemake.input.classified, snakemake.input.targets,           # noqa: F821
+        snakemake.input.holes, snakemake.input.sensitivity):           # noqa: F821
     scan = clf_path.split("/")[-2]
     d = pd.read_parquet(clf_path)
     t = pd.read_parquet(tgt_path)
     h = pd.read_parquet(hole_path)
+    s = pd.read_parquet(sens_path)
 
     # the targets file is exactly the is_target subset of the classified table
     check(f"{scan}: targets == is_target subset of classified",
@@ -44,10 +47,20 @@ for clf_path, tgt_path, hole_path in zip(
     frac = d[["f_bino", "f_wino", "f_higgsino"]]
     check(f"{scan}: composition fractions in [0,1]",
           bool(((frac >= -1e-6) & (frac <= 1 + 1e-6)).all().all()), "")
-    # holes: by construction must be light and insensitive
+    # holes: by construction insensitive, reachable, and not in an excluded class
     if len(h):
         check(f"{scan}: holes are insensitive", (h["exp_min_now"] >= float(cfg["hole_expcls_min"])).all(), "")
-        check(f"{scan}: holes are light", (h["m_light_ewk"] <= float(cfg["hole_mass_max_gev"])).all(), "")
+        check(f"{scan}: holes are Run-3-reachable",
+              (h["n_run3"] >= float(cfg["hole_min_run3_events"])).all(), "")
+        check(f"{scan}: holes exclude dedicated-search classes",
+              (~h["phys_class"].isin(set(cfg.get("hole_exclude_classes", []) or []))).all(), "")
+    # toy sensitivity: physical & restricted to the configured classes
+    if len(s):
+        want = {int(m["model"]) for m in cfg["sensitivity"]["models"] if m["scan"] == scan}
+        check(f"{scan}: sensitivity S,B >= 0", bool((s["S"] >= 0).all() and (s["B"] >= 0).all()), "")
+        check(f"{scan}: sensitivity Z finite", bool(np.isfinite(s["Z_excl"]).all()), "")
+        check(f"{scan}: sensitivity only on configured benchmark models",
+              bool(s["model_number"].isin(want).all()), "")
 
 lines = [("PASS" if ok else "FAIL") + f"  {name}" + (f"  -- {d}" if d and not ok else "")
          for name, ok, d in checks]

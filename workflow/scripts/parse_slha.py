@@ -132,6 +132,15 @@ def parse_one(text):
     out["c1_via_slepton"] = has(dau_c1, set(SLEP_CHARGED) | {1000012, 1000014, 1000016})
     out["c1_via_W"] = has(dau_c1, {24})
 
+    # leptonic branching ratios used by the toy search-sensitivity step:
+    #   br_c1_lep = BR(chi1^+ -> chi1^0 ell nu), ell in {e, mu}
+    #   br_n2_ll  = BR(chi2^0 -> chi1^0 ell+ ell-), ell in {e, mu}
+    def br_with_lepton(pdg):
+        return sum(br for br, daus in decays.get(pdg, [])
+                   if any(abs(d) in (11, 13) for d in daus))
+    out["br_c1_lep"] = br_with_lepton(1000024)
+    out["br_n2_ll"] = br_with_lepton(1000023)
+
     # lightest charged slepton
     sleps = [mass[p] for p in SLEP_CHARGED if p in mass]
     out["m_slep_light"] = min(sleps) if sleps else float("nan")
@@ -160,6 +169,7 @@ def main():
                 feat = parse_one(text)
                 feat["model_number"] = model_number
                 feat["scan"] = scan
+                feat["slha_path"] = member.name   # exact tar member, for representative extraction
                 rows.append(feat)
             except Exception:
                 n_fail += 1

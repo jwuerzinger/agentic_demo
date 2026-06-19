@@ -18,8 +18,10 @@ environment, so it reproduces exactly on any machine.
 ## How to reproduce (the only commands you need)
 
 You need [pixi](https://pixi.sh) installed (`curl -fsSL https://pixi.sh/install.sh | bash`).
-Everything else — Python, Snakemake, the scientific stack, even `curl` and the
-input data — is handled by the pipeline from the pinned `pixi.lock`.
+Everything else — Python, Snakemake, the scientific stack, the LaTeX engine
+(`tectonic`) for the Feynman diagrams, even `curl` and the input data — is handled
+by the pipeline from the pinned `pixi.lock`. (On its first run `tectonic` fetches and
+caches its TeX package bundle, so that one render step needs network once.)
 
 From the repository root:
 
@@ -58,22 +60,50 @@ the steps whose inputs or parameters changed.
 | **classify** | Assign each target to a physics class (compressed higgsino, on-shell WZ, Wh→1ℓbb, off-shell, disappearing track, …). |
 | **holes** | Find **coverage holes**: viable, light models with no expected sensitivity (not luminosity-fixable). |
 | **plots** | Mass-plane figures (excluded / allowed / target / hole). |
-| **report** | Assemble `results/report.md` + `results/class_summary.csv`. |
+| **report** | Assemble `results/report.md` + `results/class_summary.csv`; render a TikZ Feynman diagram for each populated class and extract a representative target/hole spectrum into `results/representatives/`. |
+| **sensitivity** | **Independent** toy cut-and-count reach of a *dedicated* soft-dilepton + ISR search (see `docs/search_design.md`) for **hand-selected benchmark models** (config `sensitivity.models`); depends only on the parsed spectra, not the classification. Illustrative, not a simulation. |
 | **validate** | Assert pipeline invariants; fails the build on any violation. |
 
 ### Target definition
 
 A **target** is currently **not excluded** (observed CLs ≥ 0.05), **not even
 expected to be excluded now** (expected CLs ≥ 0.05), **but** projected-excluded
-(projected CLs < 0.05) at the target luminosity — *and* it must pass the required
-external constraints (EW + Flavour by default; see below).
+(projected CLs < 0.05) at the target luminosity — *and* it must be **viable**:
+pass the required external constraints (**EW + Flavour + DM** by default; see below).
+
+### Luminosity scaling (how `project` works)
+
+Each of the 8 recastable searches reports an **expected CLs** at the baseline
+luminosity L₀. It is extrapolated to the target L in three steps (per analysis,
+per model):
+
+1. **CLs → significance** (expected CLs as a one-sided Gaussian p-value):
+   `Z = Φ⁻¹(1 − ExpCLs)` — the exclusion line `CLs = 0.05` is `Z = 1.645`.
+2. **scale with luminosity:** `Z(L) = Z · scale`, with `scale = √(L/L₀)`
+   (statistics-limited: S/√B with S, B ∝ L). For 140 → 450 fb⁻¹, `scale ≈ 1.793`.
+3. **significance → projected CLs:** `ExpCLs(L) = Φ(−Z(L))`.
+
+A model is *projected-excluded* if the **minimum** projected `ExpCLs` over the 8
+analyses drops below 0.05. The *expected* (not observed) CLs is scaled, because it
+reflects sensitivity (S, B) rather than the data fluctuation.
+
+Consequently a model newly crosses the line at 450 fb⁻¹ when its **current**
+expected CLs sits between **0.05** and **≈0.18** = `1 − Φ(1.645/1.793)`. _Example:_
+ExpCLs_now = 0.15 → Z = 1.036 → Z(L) = 1.858 → ExpCLs(L) = 0.032 (< 0.05 ⇒ target).
+
+`√L` is optimistic; set `projection: sqrtL_syst` for a systematics-floor variant
+where the gain saturates. The generated `results/report.md` recomputes all of these
+numbers for whatever `target_lumi_fb` / `projection` you set.
 
 ### A coverage **hole**
 
-is a model that is _viable_ (passes EW + Flavour), _light_ (min(m_χ₁±, m_χ₂⁰) ≤
-`hole_mass_max_gev`, so copiously produced), yet _invisible_ (min expected CLs ≥
-`hole_expcls_min`). Because there is essentially no expected sensitivity, the √L
-projection does not help — these need a **new or re-optimised search**.
+is a model that is _viable_ (passes EW + Flavour + DM), _invisible_ (min expected CLs ≥
+`hole_expcls_min` across the 8 recastable searches), and _reachable in principle_ by a
+**dedicated** Run-3 search — enough EW-ino signal is produced at the target luminosity,
+`N = σ(m,mode)·L ≥ hole_min_run3_events` (approximate 13 TeV cross-sections, so winos
+reach higher mass than higgsinos). The √L projection of the existing searches does not
+help, so these need a **new or re-optimised search**. Signatures with an existing
+dedicated search (`hole_exclude_classes`, e.g. disappearing tracks) are excluded.
 
 ### What you get
 
@@ -81,11 +111,13 @@ projection does not help — these need a **new or re-optimised search**.
 |---|---|
 | `results/report.md` | **Read this first** — headline numbers, target classes, **coverage holes**, benchmarks, caveats. |
 | `results/class_summary.csv` | Target counts per class × scan. |
+| `results/<scan>/sensitivity.parquet` | Toy dedicated-search reach for the hand-selected benchmark models (S, B, Z, excludable). |
 | `results/validation.txt` | Pass/fail of every invariant check. |
 | `results/<scan>/targets.parquet` | Flagged target models with features, projection, class. |
 | `results/<scan>/holes.parquet` | Coverage-hole models. |
 | `results/<scan>/projected.parquet` | All models with current + projected exclusion status + constraint flags. |
 | `results/<scan>/mass_plane.png` | Mass-plane plots. |
+| `results/representatives/` | Per-class TikZ Feynman diagrams (`.tex`/`.pdf`/`.png`), a representative target & hole `.slha` spectrum per class, and `MANIFEST.csv`. |
 
 ### Key knobs (`config/config.yaml`)
 
@@ -93,9 +125,11 @@ projection does not help — these need a **new or re-optimised search**.
 |---|---|---|
 | `target_lumi_fb` / `baseline_lumi_fb` | `450` / `140` | Run-3 target vs Run-2 baseline luminosity. |
 | `projection` | `sqrtL` | `sqrtL` (stat-limited) or `sqrtL_syst` (systematics floor, conservative). |
-| `require_constraints` | `[EW, Flavour]` | External constraints a target must pass (`0 = excluded`). DM is reported but not imposed (cosmology-dependent). |
+| `require_constraints` | `[EW, Flavour, DM]` | External constraints a viable target must pass (`0 = excluded`). The report still breaks counts down by tier so each cut's effect is visible. |
 | `cls_threshold` | `0.05` | CLs below this ⇒ excluded at 95% CL. |
-| `hole_mass_max_gev` / `hole_expcls_min` | `300` / `0.90` | Coverage-hole thresholds. |
+| `hole_expcls_min` / `hole_min_run3_events` | `0.90` / `5000` | Hole = expected CLs above this **and** ≥ this many produced EW-ino events at target lumi (reachability). |
+| `hole_exclude_classes` | `[LLP-disappearing-track]` | Signatures already covered by a dedicated search, excluded from holes. |
+| `sensitivity:` block | — | Toy dedicated-search parameters (ε plateau, Δm turn-on, background, systematic). All illustrative; see `docs/search_design.md`. |
 | `compressed_dm_max_gev` / `llp_ctau_min_mm` | `35` / `1.0` | Class cuts: "compressed" Δm; long-lived chargino cτ. |
 
 ---
@@ -103,17 +137,23 @@ projection does not help — these need a **new or re-optimised search**.
 ## Headline results (defaults)
 
 Applying the external constraints matters a lot — the collider-only count is
-dominated by models other measurements already disfavour:
+dominated by models other measurements already disfavour. The imposed
+requirement is **EW+Flavour+DM** (last column):
 
-| Scan | Total | Excluded now | Collider-only targets | + EW+Flavour | + DM too |
+| Scan | Total | Excluded now | Collider-only | + EW+Flavour | + EW+Flavour+DM |
 |---|---:|---:|---:|---:|---:|
-| EWKino | 12 280 | 2 355 | 364 | **251** | 41 |
-| Bino-DM | 8 897 | 2 590 | 420 | **313** | 47 |
+| EWKino | 12 280 | 2 355 | 364 | 251 | **41** |
+| Bino-DM | 8 897 | 2 590 | 420 | 313 | **47** |
 
-**Coverage holes:** 216 (EWKino) + 13 (Bino-DM), **none** fixable by Run-3
+So **88 viable Run-3 targets** in **6 physics classes** (compressed mixed/higgsino,
+disappearing track, on-shell WZ, Wh→1ℓbb, off-shell WZ).
+
+**Coverage holes:** 409 (EWKino) + 140 (Bino-DM), **none** fixable by Run-3
 luminosity. They are overwhelmingly **compressed higgsinos** (EWKino) and
-**compressed binos** (Bino-DM) — near-degenerate spectra (Δm ~ few GeV) with
-decay products too soft for current selections, viable down to ~100 GeV.
+**compressed binos** (Bino-DM) — near-degenerate spectra (Δm ~ few GeV) with decay
+products too soft for current selections, spanning m(χ₁±/χ₂⁰) ≈ 100–550 GeV (the
+reachability ceiling for higgsino-strength production at `hole_min_run3_events=5000`).
+The disappearing-track region is excluded — it already has a dedicated ATLAS search.
 
 ---
 
@@ -125,11 +165,14 @@ decay products too soft for current selections, viable down to ~100 GeV.
 ├── config/config.yaml           # all study parameters
 ├── workflow/
 │   ├── Snakefile                # the DAG
-│   └── scripts/                 # download via rule; parse_slha, merge, project,
-│                                #   classify, holes, plots, report, validate
+│   └── scripts/                 # download via rule; parse_slha, merge, project, classify,
+│                                #   holes, sensitivity, plots, report, validate
 ├── data/                        # ATLAS inputs, fetched by the `download` rule (git-ignored)
 ├── docs/dag.png                 # rendered rule graph (tracked)
+├── docs/search_design.md        # written compressed-higgsino search strategy
+├── figures/                     # bespoke benchmark diagrams (e.g. EWKino770_target.*)
 └── results/                     # generated by `pixi run run` (git-ignored)
+    └── representatives/          #   per-class Feynman diagrams + representative SLHA + MANIFEST.csv
 ```
 
 Input data provenance:
@@ -145,5 +188,7 @@ and [HEPData ins2755168](https://www.hepdata.net/record/ins2755168).
 - Decay-mode tags use the **dominant** branching ratio from the SLHA tables, not a
   full final-state simulation. Observed-only channels (disappearing track, h→inv,
   mₐ) inform the current-exclusion status but are not projected.
-- External constraints use the ATLAS-provided flags (`0 = excluded`); DM (relic
-  density + direct detection) is reported but not imposed by default.
+- External constraints use the ATLAS-provided flags (`0 = excluded`); the imposed set
+  is `EW+Flavour+DM`. The DM constraint's relic-density part is cosmology-dependent
+  (assumes the LSP is all of dark matter), so the headline table also shows the looser
+  tiers — relax via `require_constraints` if you prefer.

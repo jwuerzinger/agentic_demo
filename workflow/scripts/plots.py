@@ -6,25 +6,19 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-df = pd.read_parquet(snakemake.input[0])                      # noqa: F821
+df = pd.read_parquet(snakemake.input.projected)               # noqa: F821
+hole_ids = set(pd.read_parquet(snakemake.input.holes)["model_number"])   # noqa: F821
 scan = snakemake.wildcards.scan                               # noqa: F821
 cfg = snakemake.config                                        # noqa: F821
 L = float(cfg["target_lumi_fb"])
 
 df["dm_n2n1"] = df["m_n2"] - df["m_n1"]
-df["m_light_ewk"] = df[["m_c1", "m_n2"]].min(axis=1)
-
-# coverage holes (same definition as holes.py), computed inline for the overlay
-hole_mask = (
-    (~df["obs_excluded_now"]) & df["pass_required"]
-    & (df["m_light_ewk"] <= float(cfg["hole_mass_max_gev"]))
-    & (df["exp_min_now"] >= float(cfg["hole_expcls_min"]))
-)
+is_hole = df["model_number"].isin(hole_ids)
 
 excluded = df[df["obs_excluded_now"]]
 target = df[df["is_target"]]
-holes = df[hole_mask]
-allowed = df[~df["obs_excluded_now"] & ~df["is_target"] & ~hole_mask]
+holes = df[is_hole]
+allowed = df[~df["obs_excluded_now"] & ~df["is_target"] & ~is_hole]
 
 fig, axes = plt.subplots(1, 2, figsize=(13, 5.3))
 for ax, (yx, ylab) in zip(axes, [("m_n2", r"$m_{\chi^0_2}$ [GeV]"),

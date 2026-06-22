@@ -45,11 +45,13 @@ the steps whose inputs or parameters changed.
 
 ## The pipeline (DAG)
 
-![Snakemake rule graph](docs/dag.png)
+![Snakemake rule graph, grouped by phase](docs/dag.png)
 
-`download → parse_slha → merge_exclusion → project → {classify, plots}`, then
-`classify`/`holes` fan into `report` and `validate`. Regenerate this image with
-`pixi run dag`.
+The rules group into three phases (boxes above): **fetch inputs** → the **per-scan analysis**
+(the `parse_slha → merge_exclusion → project → classify` spine plus the `holes` / `sensitivity`
+/ `plots` branches that sprout off it) → **combine all scans** (`report`, `validate`). They stay
+as separate rules on purpose: an edit re-runs only what is *downstream* of it — and never the
+slow ~21k-file parse unless `parse_slha` itself changes. Regenerate this image with `pixi run dag`.
 
 | Step | What it does |
 |---|---|
@@ -63,6 +65,17 @@ the steps whose inputs or parameters changed.
 | **report** | Assemble `results/report.md` + `results/class_summary.csv`; render a TikZ Feynman diagram for each populated class and extract a representative target/hole spectrum into `results/representatives/`. |
 | **sensitivity** | **Independent**, data-anchored estimate for **hand-selected benchmarks** (config `sensitivity.models`): how much better than the best current search a dedicated analysis must be to exclude each model — `R_req = μ₉₅(target)`, projected in signal-strength space (`μ₉₅ ∝ 1/√L`). Not a simulation. See `docs/search_design.md`. |
 | **validate** | Assert pipeline invariants; fails the build on any violation. |
+
+### Target vs hole — the one-line distinction
+
+Both ask *what would it take to exclude this viable model?* — and split the answer:
+
+- a **target** is reached by **more luminosity** (existing searches + Run-3 data, `R_req ≤ 1`) — *just wait for data*;
+- a **hole** needs a **genuinely different analysis** (`R_req > reopt_factor` **and** a signature no
+  included search uses — here radiative χ̃₂⁰→χ̃₁⁰γ → a soft-photon + ISR-jet search) — *you have to build it*.
+
+They are **disjoint** (targets ≈ the `luminosity` reach tier, holes the `new-strategy` tier); the
+`re-optimise` band in between is neither. The precise definitions follow.
 
 ### Target definition
 

@@ -322,6 +322,22 @@ md.append(f"_Data: ATLAS pMSSM electroweak scan, arXiv:2402.01392. "
           f"A viable target must, on top of the ATLAS collider exclusion, pass the external "
           f"constraints **{REQ}** (ATLAS flags, 0 = excluded)._\n")
 
+md.append("## Targets vs holes — two different questions\n")
+_nt = sum(int(d["is_target"].sum()) for d in proj.values())
+md.append("The study asks, for every viable model, **what would it take to exclude it?** — and keeps two "
+          "answers that are easy to conflate strictly apart:\n\n"
+          "| | **Target** | **Hole** |\n"
+          "|---|---|---|\n"
+          "| The question | Will **more luminosity** exclude it? | Does it need a **different kind of analysis**? |\n"
+          f"| Condition | the existing searches + Run-3 data reach it (`R_req ≤ 1`; projected-excluded by the √L test) | "
+          f"re-optimising the existing searches *can't* (`R_req > {cfg['reopt_factor']:g}`) **and** its dominant decay is a "
+          "signature none of them use (radiative χ̃₂⁰→χ̃₁⁰γ) |\n"
+          "| The fix | just wait for data | **build a new search** (here: soft-photon + ISR-jet) |\n"
+          "| Reach tier | `luminosity` | `new-strategy` |\n"
+          f"| Count | **{_nt}** targets | **{len(all_h)}** holes |\n\n"
+          "They are **disjoint** — a model is never both. The band in between (a re-optimised existing search "
+          f"would reach it: `1 < R_req ≤ {cfg['reopt_factor']:g}`) is the `re-optimise` tier, which is neither.\n")
+
 md.append("## Definition of a target\n")
 md.append("A model is a **Run-3 target** if it is:\n\n"
           "1. **not excluded now** (observed): min over all channels of `ObsCLs` >= 0.05;\n"
@@ -446,6 +462,18 @@ md.append("\n- **luminosity** — the existing searches reach these with Run-3 d
           "is one none of them exploits (radiative χ̃₂⁰→χ̃₁⁰γ → soft photon; tau-rich → tau). These need a "
           "genuinely different analysis.\n"
           "- **out-of-reach** — far from the included searches, with no distinct alternative handle.\n")
+RADMIN = float(cfg["hole_radiative_min"])
+md.append("**Where the radiative (soft-photon-signature) models fall.** The χ̃₂⁰→χ̃₁⁰γ decay itself spans "
+          "every tier — a radiative decay does *not* by itself make a hole. Luminosity defuses the least-"
+          "compressed radiative models; only those where the soft-lepton search is *also* blind become holes:\n")
+md.append(f"| Scan | radiative & luminosity (R≤1) | radiative & re-optimise (R≤{_rf:g}) | radiative & **new-strategy (holes)** |")
+md.append("|---|---:|---:|---:|")
+for scan, d in proj.items():
+    v = d[(~d["obs_excluded_now"]) & d["pass_required"]]
+    rt = v[v["br_n2_gamma"].fillna(0) >= RADMIN]["reach_tier"].value_counts()
+    md.append(f"| {scan} | {int(rt.get('lumi', 0))} | {int(rt.get('reoptimise', 0))} | "
+              f"**{int(rt.get('new-strategy', 0))}** |")
+md.append("")
 md.append(f"A **hole** = a *new-strategy* model that is also produced enough for a dedicated search "
           f"(N = σ·L ≥ {int(cfg['hole_min_run3_events'])} events) and not already covered by an included "
           f"dedicated search ({', '.join(f'`{c}`' for c in _excl) or 'none'}).\n")
@@ -504,6 +532,47 @@ md.append("The holes are radiative compressed higgsinos/binos (χ̃₂⁰→χ̃
           "from χ̃₁± as a complementary region — targets them; the full analysis design (trigger, low-pT "
           "photon reconstruction, discriminating variables, backgrounds, control/validation regions, "
           "interpretation) is written up in [`docs/search_design.md`](../docs/search_design.md).\n")
+
+# --- photon-reachability sweet spot ---------------------------------
+_dmin = float(cfg.get("photon_recon_dm_min_gev", 3.0))
+md.append(f"**Where this search has a real chance — the photon sweet spot.** The decay photon carries rest-"
+          f"frame energy `E_γ ≈ Δm(χ̃₂⁰,χ̃₁⁰)` (a few GeV), boosted by the ISR recoil. Below `Δm ≈ {_dmin:g}` GeV "
+          f"it is too soft to reconstruct even for a dedicated converted-photon search, so the *most* compressed "
+          f"holes are likely beyond **both** the lepton search and this one. Prospects peak at intermediate Δm "
+          f"(photon hard enough) with high production and high BR(χ̃₂⁰→χ̃₁⁰γ):\n")
+md.append(f"| Scan | holes | photon-reachable (Δm ≥ {_dmin:g} GeV) | ultra-compressed (Δm < {_dmin:g}, photon likely too soft) |")
+md.append("|---|---:|---:|---:|")
+for scan, h in holes.items():
+    if not len(h):
+        md.append(f"| {scan} | 0 | – | – |")
+        continue
+    nr = int((h["dm_n2n1"] >= _dmin).sum())
+    md.append(f"| {scan} | {len(h)} | **{nr}** | {len(h) - nr} |")
+md.append("")
+if len(all_h):
+    def _prospects(d):
+        d = d[d["dm_n2n1"] >= _dmin].copy()
+        d["_promise"] = (d["br_n2_gamma"].fillna(0) * np.log10(d["n_run3"].clip(lower=1))
+                         * (d["dm_n2n1"].clip(upper=8) / 8.0))
+        return d.sort_values("_promise", ascending=False).head(3)
+    cand = pd.concat([_prospects(h) for h in holes.values() if len(h)], ignore_index=True)
+    md.append("Best dedicated-soft-photon prospects — **top 3 per scan**, ranked by BR × production × "
+              "photon-hardness (*not* by `R_req`, which only measures how blind the lepton search is):\n")
+    pc = [c for c in ["scan", "model_number", "m_light_ewk", "dm_n2n1", "br_n2_gamma", "n_run3", "R_req"]
+          if c in cand.columns]
+    md.append("| " + " | ".join(pc) + " |")
+    md.append("|" + "---|" * len(pc))
+    for _, r in cand.iterrows():
+        md.append("| " + " | ".join(fmt_R(r[c]) if c == "R_req" else
+                                     (f"{r[c]:.4g}" if isinstance(r[c], float) else str(r[c])) for c in pc) + " |")
+    md.append("\n**The trade-off.** The EWKino higgsinos (e.g. **770**) have the highest *production* but the "
+              "softest photons (Δm≈4–5 GeV, near the reconstruction floor); the moderately-compressed Bino-DM "
+              "models (Δm≈8–10 GeV) have *harder, more reconstructable* photons at lower production — arguably "
+              "the cleaner prospects for a first soft-photon search. The ultra-compressed benchmarks **9030 / "
+              "3115** (Δm≈1–1.4 GeV) are lepton-blind but their photon is likely *also* too soft — the edge of "
+              "*any* reach. **770 stays the worked example** (canonical light higgsino, in the window); the "
+              "Bino-DM Δm≈8–10 GeV models are the strongest single-search prospects.\n")
+
 _fig = "figures/EWKino770_target.png"
 if os.path.exists(_fig):
     md.append(f"Benchmark topology (EWKino 770):\n\n![EWKino 770 target diagram]({os.path.join('..', _fig)})\n")

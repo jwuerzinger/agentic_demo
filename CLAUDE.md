@@ -99,6 +99,8 @@ whenever the workflow or its commands change (the README also embeds `docs/dag.p
 ```
 config/config.yaml      # ALL parameters (lumi, CLs threshold, projection, constraints, class & hole cuts)
 workflow/Snakefile      # the DAG (rule `download` is first; `rule all` must stay the top rule)
+workflow/cluster_dag.py # render helper: groups `--rulegraph` into phase clusters for docs/dag.png
+                         #   (run by `pixi run dag`, NOT a Snakemake rule; phase->rule map lives here)
 workflow/scripts/        parse_slha -> merge -> project -> classify ; holes ; plots ; report ; validate
                          #   sensitivity branches off merge_exclusion (independent benchmark study)
 docs/search_design.md   # written radiative-compressed-higgsino soft-photon + ISR-jet search strategy

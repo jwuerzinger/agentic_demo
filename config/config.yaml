@@ -84,6 +84,12 @@ hole_tau_min: 0.50            # BR(chi1+ -> chi1 tau nu) above this = tau-rich -
 hole_min_run3_events: 5000    # production floor (sigma*L) for "reachable in principle" by a dedicated search
 hole_exclude_classes:         # signatures with an existing dedicated search
   - LLP-disappearing-track    #   covered by the ATLAS DisappearingTrack search
+# Soft-photon reconstructability floor. The radiative decay photon carries rest-frame energy
+# E_gamma ~ dm(chi2,chi1); below ~ this the photon is too soft to reconstruct/ID even for a
+# dedicated low-E_T (converted-photon) search, so those ultra-compressed holes are likely beyond
+# the proposed soft-photon search too (lepton-blind AND photon-blind). Used by report.py /
+# sensitivity.py only to FLAG photon-reachability -- it does NOT change the hole definition.
+photon_recon_dm_min_gev: 3.0
 
 # Approximate NLO+NLL EW-ino production cross-sections at sqrt(s)=13 TeV [GeV, fb]
 # (LHC SUSY Cross Section WG; order-of-magnitude). Shared by the hole reachability

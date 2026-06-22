@@ -22,58 +22,77 @@ pp → χ̃₁±χ̃₂⁰   via Drell-Yan (W*),  recoiling against a hard ISR j
    χ̃₁± → χ̃₁⁰ ℓ±ν      (soft lepton; BR ≈ 35% to e/µ, prompt)   <- complementary tag
 ```
 
-The photon energy is set by the χ̃₂⁰–χ̃₁⁰ splitting (a few GeV, hence *soft*); the two χ̃₁⁰ plus the
-neutrino carry the missing transverse momentum. The associated χ̃₂⁰χ̃₁⁰ channel gives the cleanest
-**single-soft-photon + ISR + Eᵀmiss** topology; χ̃₁±χ̃₂⁰ adds a soft lepton for a lower-background tag.
+The radiative photon is **soft**: its rest-frame energy is `E_γ = (m₂²−m₁²)/2m₂ ≈ Δm(χ̃₂⁰,χ̃₁⁰)` — a
+*few* GeV. The hard ISR jet that the system recoils against boosts it modestly into the lab frame
+(to ~5–20 GeV for an O(100–200 GeV) ISR jet), and the two χ̃₁⁰ plus the neutrino carry the Eᵀmiss.
+
+### Reach floor and the two production channels (the make-or-break)
+
+- **Reach floor.** Because `E_γ ≈ Δm`, the search has a hard *low-Δm* limit: below `Δm ≈ 3 GeV`
+  (`config: photon_recon_dm_min_gev`) the photon is too soft to reconstruct or trigger-assist even
+  with dedicated low-Eᵀ / converted-photon methods. The *most* compressed holes are therefore likely
+  beyond **both** the lepton search and this one — honest "edge of any reach" territory. The sweet
+  spot is intermediate Δm (≈ 3–8 GeV): photon hard enough to see, splittings still too small for the
+  soft-lepton search. (The report's hole table flags photon-reachable vs ultra-compressed counts.)
+- **Two channels.**
+  - **0ℓ: χ̃₂⁰χ̃₁⁰ → γ + ISR + Eᵀmiss.** Highest rate, but swamped by Z(→νν)+γ and fake photons at
+    low Eᵀ — viable only if low-Eᵀ photon ID and the fake estimate are under tight control.
+  - **1ℓ: χ̃₁±χ̃₂⁰ → γ + soft ℓ + ISR + Eᵀmiss.** Lower rate, but the soft-lepton tag suppresses the
+    QCD/fake-photon background by orders of magnitude. **For the genuinely compressed holes this is
+    likely the *more* sensitive channel**, despite the rate cost — it is where a dedicated search
+    most plausibly beats the lepton-only re-optimisation.
 
 ## Strategy
 
 | Element | Choice | Why |
 |---|---|---|
 | **Trigger** | Eᵀmiss trigger, threshold ~200 GeV | the soft photon (and any soft lepton) cannot trigger; the ISR recoil provides the Eᵀmiss |
-| **Objects** | **low-pT photon** (pT ≳ 10 GeV, including converted γ); ISR jet(s); Eᵀmiss; optional soft e/µ (pT ≳ 3–4 GeV) | low-pT photon reconstruction/ID against π⁰ and fakes is *the* dedicated ingredient |
-| **Preselection** | ≥1 ISR jet (pT ≳ 100 GeV); Eᵀmiss ≳ 200 GeV; ≥1 soft photon; b-jet veto; (optional) ≤1 soft lepton | isolate the ISR-recoil radiative-compressed topology |
+| **Objects** | photon down to **the lowest Eᵀ reconstruction allows** (~5–10 GeV; **converted** photons extend lower); ISR jet(s); Eᵀmiss; soft e/µ (pT ≳ 3–4 GeV) for the 1ℓ channel | pushing low-Eᵀ photon reco/ID below the standard ~25 GeV threshold is *the* dedicated ingredient and the make-or-break |
+| **Preselection** | ≥1 ISR jet (pT ≳ 100 GeV); Eᵀmiss ≳ 200 GeV; ≥1 soft photon; b-jet veto; split by soft-lepton multiplicity (0ℓ / 1ℓ) | isolate the ISR-recoil radiative-compressed topology |
 
 ### Discriminating variables
-- **Eᵀ(γ)** and **Eᵀ(γ)/Eᵀmiss ≈ Δm/m** — both track the compression; the soft-photon spectrum peaks at ~Δm/2.
-- **Δφ(Eᵀmiss, ISR jet)** (back-to-back), **min Δφ(jet, Eᵀmiss)** (reject mis-measured jets).
-- **Eᵀmiss-significance**; in the χ̃₁±χ̃₂⁰ region, the soft lepton's pT and mᵀ(ℓ, Eᵀmiss).
+- **Eᵀ(γ)** and **Eᵀ(γ)/Eᵀmiss** — the photon spectrum endpoint tracks Δm, exactly as `m(ℓℓ)` does
+  for the soft-dilepton search; the single most powerful variable, scanned in fine bins.
+- **Δφ(Eᵀmiss, ISR jet)** (back-to-back), **min Δφ(jet, Eᵀmiss)** (reject mis-measured jets),
+  **Eᵀmiss-significance**.
+- 1ℓ channel: soft-lepton pT and mᵀ(ℓ, Eᵀmiss).
 
 ### Signal regions
-Binned in **Eᵀ(γ)** (soft, ≈ 1–15 GeV — the spectrum sweeps Δm) × **Eᵀmiss**, split by soft-lepton
-multiplicity (0ℓ: χ̃₂⁰χ̃₁⁰; 1ℓ: χ̃₁±χ̃₂⁰). The hardest (most compressed) points like 770 populate the
-lowest Eᵀ(γ) bins, exactly where no existing search has an object to select.
+Binned in **Eᵀ(γ)** (soft, the endpoint sweeps Δm) × **Eᵀmiss**, in 0ℓ and 1ℓ categories. The lowest
+Eᵀ(γ) bins target the hardest (most compressed) points; the reach floor above sets where the binning
+stops being meaningful.
 
 ### Backgrounds and estimation
 | Background | Source | Estimate |
 |---|---|---|
-| Fake photons | jets / π⁰ → "photon" | **data-driven** from a photon-ID sideband (loose-not-tight) |
-| Z(→νν)+γ, W(→ℓν)+γ | real soft γ + genuine Eᵀmiss | MC normalised in a dedicated CR |
-| Z(→νν)+jets, W+jets | jet faking γ, real Eᵀmiss | folded into the fake-photon estimate + CR |
+| **Fake photons** (dominant at low Eᵀ) | jets / π⁰→γγ misidentified as a photon | **data-driven** from a photon-ID sideband (loose-not-tight / converted-track templates); the limiting systematic |
+| Z(→νν)+γ | real soft γ + genuine Eᵀmiss | MC normalised in a dedicated CR; irreducible in 0ℓ |
+| W(→ℓν)+γ | real γ + Eᵀmiss + lepton | MC + CR; the main background to the 1ℓ channel (still far smaller than 0ℓ fakes) |
 | Drell-Yan / γ+jets | mis-measured Eᵀmiss | min Δφ(jet,Eᵀmiss) + Eᵀmiss-significance |
 
-Each gets a control region (normalisation) and a validation region (closure) adjacent to the SRs.
+The **fake-photon rate at low Eᵀ is the analysis-defining challenge** — the photon analogue of the
+soft-lepton fake problem. The 1ℓ requirement is the cleanest lever against it.
 
 ### Systematics
-Fake-photon factor (dominant), low-pT photon reco/ID/isolation efficiency, jet/Eᵀmiss scale &
-resolution, pile-up, and MC theory (Vγ). The fake-photon estimate and the soft-photon efficiency
-are what a dedicated analysis must control to open this final state.
+Fake-photon factor (dominant), low-Eᵀ photon reco/ID/conversion efficiency, jet/Eᵀmiss scale &
+resolution, pile-up, MC theory (Vγ). Controlling the fake-photon estimate and the low-Eᵀ photon
+efficiency is what a dedicated analysis must do to open this final state.
 
 ### Interpretation
-CLs limits in the (m(χ̃₁⁰), Δm) plane. 770 sits at m ≈ 183 GeV, Δm ≈ 4.5 GeV — invisible to the
-current programme because its visible energy is a soft *photon*, not a lepton or jet. A dedicated
-soft-photon SR is what gives any handle at all.
+CLs limits in the (m(χ̃₁⁰), Δm) plane. 770 (m ≈ 183 GeV, Δm ≈ 4.5 GeV) sits in the sweet spot:
+invisible to the current program because its visible energy is a soft *photon*, yet with Δm large
+enough that a dedicated soft-photon SR has a genuine handle.
 
 ## What the toy in the pipeline does (and does not)
 
 `workflow/scripts/sensitivity.py` is **not** a detector simulation. It is data-anchored: for each
 benchmark it reads the **real** per-model expected CLs (best of the 8 recastable searches) from
 `merged.parquet`, converts it to an expected limit on signal strength via the asymptotic
-`ExpCLs(µ)=2(1−Φ(µ/σ))`, and projects it in signal-strength space (`µ₉₅ ∝ 1/√L`, the physically
-correct monotonic scaling — unlike the √L *significance* heuristic used elsewhere, see the caveat
-in `project.py`). The output is **`R_req`** = the factor by which a dedicated search must beat the
-best current search to exclude the model at the target luminosity: `R_req ≤ 1` ⇒ luminosity alone
-suffices; `R_req ≤ assumed_improvement` ⇒ a realistic dedicated search could. The single tunable
-input is `assumed_improvement` (`sensitivity:` block in `config/config.yaml`); everything else is
-the measured per-model sensitivity. It gives the **required improvement**, not a simulated limit —
-a real result needs full signal+background simulation and the data-driven fake-photon estimate above.
+`ExpCLs(µ)=2(1−Φ(µ/σ))`, and projects it in signal-strength space (`µ₉₅ ∝ 1/√L`). The output is
+**`R_req`** = the improvement needed over the best current search — which, crucially, is the soft-
+*lepton* search that uses **none** of the photon. So `R_req` is *lepton-channel-anchored*: a large
+value means the lepton search is blind, **not** that a photon search fails. Whether the soft-photon
+channel closes that gap is exactly what this metric cannot tell you — it needs the real low-Eᵀ photon
+efficiency and fake-photon background above. The verdict (`luminosity` / `lepton re-opt` /
+`needs new channel (photon)` / `out of reach`) reports that distinction honestly; the lone tunable
+input is `assumed_improvement` (the lepton re-opt gain).

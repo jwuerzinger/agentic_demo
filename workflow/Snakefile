@@ -2,9 +2,12 @@
 # Run-3 EWK SUSY target study  (ATLAS pMSSM scan, arXiv:2402.01392)
 #
 # DAG (per scan):
-#   download -> parse_slha -> merge_exclusion -> project -> classify -> {plots, holes}
-#   report   <- (projected, targets, classified, class_counts, holes, plots) for all scans
-#   validate <- (classified, targets, holes) for all scans
+#   download -> parse_slha -> merge_exclusion -> analyze -> plots
+#                                             \-> sensitivity        (independent benchmark study)
+#   report   <- (classified, targets, class_counts, holes, sensitivity, plots) for all scans
+#   validate <- (classified, targets, holes, sensitivity) for all scans
+# `analyze` folds the former project + classify + holes steps into one rule (all fast, all
+# config-triggered, a linear chain); `sensitivity` stays separate (it branches off merged).
 #
 # `download` fetches the SLHA tarballs + exclusion CSVs from the ATLAS public page,
 # so a fresh checkout needs no manual data step. Existing files are reused (the rule
@@ -81,40 +84,22 @@ rule merge_exclusion:
         "scripts/merge.py"
 
 
-rule project:
+rule analyze:
+    """project + classify + holes in one pass over merged.parquet (all fast, all
+    config-triggered, a linear chain). Emits the same artifacts as the former three rules
+    (classified is the full per-scan table; projected.parquet is gone, classified supersedes it)."""
     input:
         "results/{scan}/merged.parquet",
     output:
-        "results/{scan}/projected.parquet",
-    params:
-        cfg=config,
-    script:
-        "scripts/project.py"
-
-
-rule classify:
-    input:
-        "results/{scan}/projected.parquet",
-    output:
         classified="results/{scan}/classified.parquet",
         targets="results/{scan}/targets.parquet",
-        summary="results/{scan}/class_counts.csv",
-    params:
-        cfg=config,
-    script:
-        "scripts/classify.py"
-
-
-rule holes:
-    input:
-        "results/{scan}/classified.parquet",
-    output:
+        counts="results/{scan}/class_counts.csv",
         holes="results/{scan}/holes.parquet",
-        summary="results/{scan}/holes_counts.csv",
+        holes_counts="results/{scan}/holes_counts.csv",
     params:
         cfg=config,
     script:
-        "scripts/holes.py"
+        "scripts/analyze.py"
 
 
 rule sensitivity:
@@ -135,7 +120,7 @@ rule sensitivity:
 
 rule plots:
     input:
-        projected="results/{scan}/projected.parquet",
+        classified="results/{scan}/classified.parquet",
         holes="results/{scan}/holes.parquet",
     output:
         "results/{scan}/mass_plane.png",
@@ -147,7 +132,7 @@ rule plots:
 
 rule report:
     input:
-        projected=expand("results/{scan}/projected.parquet", scan=SCANS),
+        classified=expand("results/{scan}/classified.parquet", scan=SCANS),
         targets=expand("results/{scan}/targets.parquet", scan=SCANS),
         counts=expand("results/{scan}/class_counts.csv", scan=SCANS),
         holes=expand("results/{scan}/holes.parquet", scan=SCANS),

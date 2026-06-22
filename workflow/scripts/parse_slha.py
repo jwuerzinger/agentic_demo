@@ -8,7 +8,7 @@ For each model we extract, directly from the SPheno SLHA output:
   * dominant decays    of chi2^0 and chi1^+             (DECAY tables)
 
 Derived mass splittings and composition labels are computed downstream
-(classify.py) so the raw, auditable numbers live here.
+(analyze.py) so the raw, auditable numbers live here.
 
 Run as a Snakemake `script:` (reads the injected `snakemake` object).
 """
@@ -127,7 +127,7 @@ def parse_one(text):
     # The LSP (1000022) recoils invisibly; bucket each decay by what accompanies it. On-shell
     # 2-body decays give chi1 + {Z, h, gamma, W}; off-shell (compressed) 3-body decays give
     # chi1 + a fermion pair. These SUMMED BRs (not just the single dominant channel) are what
-    # classify.py (WZ/Wh) and project.py (the radiative "uncovered signature" flag) read, so the
+    # analyze.py (WZ/Wh classification and the radiative "uncovered signature" flag) reads, so the
     # radiative / WZ / Wh / leptonic determinations all sit on the same footing.
     LEP, TAU, NU, QRK = {11, 13}, {15}, {12, 14, 16}, {1, 2, 3, 4, 5, 6}
 

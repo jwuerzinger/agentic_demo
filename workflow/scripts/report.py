@@ -15,7 +15,7 @@ L = float(cfg["target_lumi_fb"])
 L0 = float(cfg["baseline_lumi_fb"])
 THR = float(cfg["cls_threshold"])
 
-# luminosity scale factor (mirror project.py) for the Method section
+# luminosity scale factor (mirror analyze.py) for the Method section
 _ratio = L / L0
 if cfg.get("projection", "sqrtL") == "sqrtL_syst":
     _f = float(cfg.get("systematics_fraction", 0.30))
@@ -234,7 +234,7 @@ def scan_of(path):
 
 
 # ---- load everything ----
-proj = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.projected}   # noqa: F821
+proj = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.classified}  # noqa: F821  (full per-scan table)
 tgts = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.targets}     # noqa: F821
 holes = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.holes}      # noqa: F821
 sens = {scan_of(p): pd.read_parquet(p) for p in snakemake.input.sensitivity}  # noqa: F821

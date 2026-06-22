@@ -68,7 +68,7 @@ mass_W: 80.379
 # --- Search-strategy reach tiers & coverage holes -------------------
 # For each viable, currently-allowed model we ask what it would take to exclude it,
 # using R_req = the improvement over the best current search needed at the target lumi
-# (mu-space, mu95 ~ 1/sqrt(L); computed in project.py). The tiers (classify.py):
+# (mu-space, mu95 ~ 1/sqrt(L); computed in analyze.py). The tiers:
 #   lumi         : R_req <= 1                 -> existing searches + Run-3 luminosity
 #   reoptimise   : 1 < R_req <= reopt_factor  -> re-optimise an included search
 #   new-strategy : R_req > reopt_factor AND a dominant signature no included search uses
@@ -106,7 +106,7 @@ xsec_13tev_fb:
 # data-anchored (baseline = the real per-model expected CLs, min over the 8 searches) and
 # works in signal-strength space, where the expected 95% CL upper limit scales as
 #     mu95(L) = mu95(L0) * sqrt(L0 / L)      (the physically correct, monotonic scaling)
-# -- NOT the sqrt-L significance heuristic in project.py, which is only valid near the
+# -- NOT the sqrt-L significance heuristic in analyze.py, which is only valid near the
 # exclusion boundary (ExpCLs <~ 0.5) and misbehaves for far-from-reach models (see the
 # caveat there). The required improvement factor is R_req = mu95(target): R_req <= 1 means
 # luminosity alone suffices. IMPORTANT: R_req is anchored to the best CURRENT search, which for

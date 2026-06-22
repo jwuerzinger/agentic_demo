@@ -5,7 +5,7 @@ Data-anchored and independent of the target/hole classification: it reads the re
 per-model expected CLs (min over the 8 recastable searches) from `merged.parquet` and
 works in SIGNAL-STRENGTH space, where the expected 95% CL upper limit scales as
     mu95(L) = mu95(L0) * sqrt(L0 / L)         (physically correct; monotonic in L)
--- unlike the sqrt-L *significance* heuristic in project.py, which is only valid near the
+-- unlike the sqrt-L *significance* heuristic in analyze.py, which is only valid near the
 exclusion boundary (ExpCLs <~ 0.5) and misbehaves for far-from-reach models.
 
 mu95(L0) is recovered from the expected CLs via the asymptotic CLs relation

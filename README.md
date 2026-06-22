@@ -48,19 +48,17 @@ the steps whose inputs or parameters changed.
 ![Snakemake rule graph, grouped by phase](docs/dag.png)
 
 The rules group into three phases (boxes above): **fetch inputs** → the **per-scan analysis**
-(the `parse_slha → merge_exclusion → project → classify` spine plus the `holes` / `sensitivity`
-/ `plots` branches that sprout off it) → **combine all scans** (`report`, `validate`). They stay
-as separate rules on purpose: an edit re-runs only what is *downstream* of it — and never the
-slow ~21k-file parse unless `parse_slha` itself changes. Regenerate this image with `pixi run dag`.
+(`parse_slha → merge_exclusion → analyze`, with `sensitivity` and `plots` branching off) →
+**combine all scans** (`report`, `validate`). `analyze` folds the project/classify/holes stages
+into one rule; the separate rules stay separate so an edit re-runs only what is *downstream* of
+it — and never the slow ~21k-file parse unless `parse_slha` changes. Regenerate with `pixi run dag`.
 
 | Step | What it does |
 |---|---|
 | **download** | Fetch the SLHA tarballs + exclusion CSVs from the ATLAS page into `data/` (skipped if present). |
 | **parse_slha** | Stream every `.slha` spectrum from the tarball; extract masses, gaugino/higgsino composition (neutralino mixing matrix), mass splittings, chargino lifetime, dominant decay modes. |
 | **merge_exclusion** | Join with the per-analysis expected/observed CLs from the CSV (keyed by `Model_number`). |
-| **project** | Scale each of the 8 recastable searches' *expected* significance from 140 → target fb⁻¹; flag **targets**. |
-| **classify** | Assign each target to a physics class (compressed higgsino, on-shell WZ, Wh→1ℓbb, off-shell, disappearing track, …). |
-| **holes** | Find **coverage holes**: viable models in the *new-strategy* reach tier (a re-optimised included search can't reach them **and** their dominant signature is one none exploit), produced enough + not a covered class. |
+| **analyze** | One pass over `merged.parquet` doing three stages (formerly three rules): **project** — scale each of the 8 recastable searches' *expected* significance from 140 → target fb⁻¹ + the `R_req`/reach-tier taxonomy, flag **targets**; **classify** — assign a physics class (compressed higgsino, on-shell WZ, Wh→1ℓbb, off-shell, disappearing track, …); **holes** — the *new-strategy* coverage gaps (a re-optimised included search can't reach them **and** their dominant signature is one none exploit), produced enough + not a covered class. Emits `classified` / `targets` / `class_counts` / `holes` / `holes_counts`. |
 | **plots** | Mass-plane figures (excluded / allowed / target / hole). |
 | **report** | Assemble `results/report.md` + `results/class_summary.csv`; render a TikZ Feynman diagram for each populated class and extract a representative target/hole spectrum into `results/representatives/`. |
 | **sensitivity** | **Independent**, data-anchored estimate for **hand-selected benchmarks** (config `sensitivity.models`): how much better than the best current search a dedicated analysis must be to exclude each model — `R_req = μ₉₅(target)`, projected in signal-strength space (`μ₉₅ ∝ 1/√L`). Not a simulation. See `docs/search_design.md`. |
@@ -113,7 +111,7 @@ numbers for whatever `target_lumi_fb` / `projection` you set.
 For every viable, currently-allowed model we ask what it would take to exclude it at the
 target luminosity, via **`R_req`** — the improvement needed over the *best current search*,
 in signal-strength space (`μ₉₅ ∝ 1/√L`, the physically correct scaling). That sorts models
-into tiers (`reach_tier`, computed in `project.py`):
+into tiers (`reach_tier`, computed in `analyze.py`):
 
 - **luminosity** (`R_req ≤ 1`) — the existing searches reach them with Run-3 data alone;
 - **re-optimise** (`1 < R_req ≤ reopt_factor`) — a tweak of an included search (lower
@@ -138,7 +136,7 @@ suggested `alt_strategy`. (Holes and targets are disjoint: targets ≈ the `lumi
 | `results/validation.txt` | Pass/fail of every invariant check. |
 | `results/<scan>/targets.parquet` | Flagged target models with features, projection, class. |
 | `results/<scan>/holes.parquet` | Coverage-hole models. |
-| `results/<scan>/projected.parquet` | All models with current + projected exclusion status + constraint flags. |
+| `results/<scan>/classified.parquet` | All models (the full per-scan table): current + projected exclusion, `R_req`/reach tier, constraint flags, physics class. |
 | `results/<scan>/mass_plane.png` | Mass-plane plots. |
 | `results/representatives/` | Per-class TikZ Feynman diagrams (`.tex`/`.pdf`/`.png`), a representative target & hole `.slha` spectrum per class, and `MANIFEST.csv`. |
 
@@ -191,8 +189,9 @@ m(χ̃₁±/χ̃₂⁰) ≈ 97–553 GeV and include the worked-example benchmar
 ├── config/config.yaml           # all study parameters
 ├── workflow/
 │   ├── Snakefile                # the DAG
-│   └── scripts/                 # download via rule; parse_slha, merge, project, classify,
-│                                #   holes, sensitivity, plots, report, validate
+│   ├── scripts/                 # parse_slha, merge, analyze (project+classify+holes),
+│   │                            #   sensitivity, plots, report, validate
+│   └── cluster_dag.py           # groups the rulegraph into phases for docs/dag.png
 ├── data/                        # ATLAS inputs, fetched by the `download` rule (git-ignored)
 ├── docs/dag.png                 # rendered rule graph (tracked)
 ├── docs/search_design.md        # written compressed-higgsino search strategy

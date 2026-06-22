@@ -6,7 +6,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
-df = pd.read_parquet(snakemake.input.projected)               # noqa: F821
+df = pd.read_parquet(snakemake.input.classified)              # noqa: F821
 hole_ids = set(pd.read_parquet(snakemake.input.holes)["model_number"])   # noqa: F821
 scan = snakemake.wildcards.scan                               # noqa: F821
 cfg = snakemake.config                                        # noqa: F821

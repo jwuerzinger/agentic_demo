@@ -101,8 +101,8 @@ config/config.yaml      # ALL parameters (lumi, CLs threshold, projection, const
 workflow/Snakefile      # the DAG (rule `download` is first; `rule all` must stay the top rule)
 workflow/cluster_dag.py # render helper: groups `--rulegraph` into phase clusters for docs/dag.png
                          #   (run by `pixi run dag`, NOT a Snakemake rule; phase->rule map lives here)
-workflow/scripts/        parse_slha -> merge -> project -> classify ; holes ; plots ; report ; validate
-                         #   sensitivity branches off merge_exclusion (independent benchmark study)
+workflow/scripts/        parse_slha -> merge -> analyze ; plots ; report ; validate
+                         #   analyze = project+classify+holes in one pass; sensitivity branches off merge (indep.)
 docs/search_design.md   # written radiative-compressed-higgsino soft-photon + ISR-jet search strategy
 figures/                # bespoke benchmark diagrams (e.g. EWKino770_target.*), not pipeline-generated
 data/                   # ATLAS inputs (fetched by `download`, git-ignored)
@@ -111,32 +111,36 @@ results/                # generated (per-scan parquet, plots, report.md, holes, 
 results/representatives/ #   per-class TikZ Feynman diagrams + representative target/hole .slha + MANIFEST.csv
 ```
 
-Pipeline per scan: `download → parse_slha → merge_exclusion → project → classify` (+ `plots`, `holes`); a
-separate `sensitivity` branch hangs off `merge_exclusion` (independent benchmark study); then `report` + `validate`
-fan in all scans. Scripts use the Snakemake `script:` directive — they read the injected
+Pipeline per scan: `download → parse_slha → merge_exclusion → analyze → plots`; a separate `sensitivity`
+branch hangs off `merge_exclusion` (independent benchmark study); then `report` + `validate` fan in all scans.
+`analyze` folds the former `project`/`classify`/`holes` rules into one pass (all fast, all config-triggered, a
+linear chain) — `classified.parquet` is the full per-scan table (there is no `projected.parquet`). Scripts use
+the Snakemake `script:` directive — they read the injected
 `snakemake` object (`snakemake.input/output/params/config/wildcards`), not argparse. (The `download` rule uses
 `shell:` with `curl`; its output is `data/{fname}` with a `wildcard_constraints` on the known filenames.)
 
 ### Method
 
-- **`project.py`** — (i) √L scaling of expected significance to `target_lumi_fb` for the **targets**
-  (`Z = Φ⁻¹(1−ExpCLs)`, `Z(L)=Z·scale`; `sqrtL` or `sqrtL_syst`); a target is not-excluded-now,
+- **`analyze.py`** — one pass over `merged.parquet` running three stages (the former `project`/`classify`/`holes`
+  rules), emitting `classified` (full table) / `targets` / `class_counts` / `holes` / `holes_counts`:
+- **`analyze.py` · stage 1 (project)** — (i) √L scaling of expected significance to `target_lumi_fb` for the
+  **targets** (`Z = Φ⁻¹(1−ExpCLs)`, `Z(L)=Z·scale`; `sqrtL` or `sqrtL_syst`); a target is not-excluded-now,
   projected-excluded, and passes `require_constraints`. (ii) Also computes the **`reach_tier`** (the search-
   strategy axis) in *signal-strength* space: `R_req = μ₉₅(target)` with `μ₉₅(L)=μ₉₅(L0)·√(L0/L)` and
   `μ₉₅` from `exp_min_now` (best of the 8) via the asymptotic `ExpCLs(μ)=2(1−Φ(μ/σ))`. Tiers: `lumi`
   (R_req≤1), `reoptimise` (≤`reopt_factor`), `new-strategy` (>`reopt_factor` AND `signature_uncovered`:
   radiative χ̃₂⁰→χ̃₁⁰γ ≥ `hole_radiative_min` or tau-rich), `out-of-reach`. The √L *significance* heuristic is
-  only valid near the boundary (see the project.py docstring); the tier/R_req use the correct μ-space scaling.
-- **`classify.py`** — bins targets into physics classes via interpretable cuts (LSP composition from `NMIX`,
-  mass splittings, intermediate sleptons, chargino cτ); also writes the full `classified.parquet`.
-- **`holes.py`** — coverage holes = the **`new-strategy`** reach tier (a re-optimised included search can't
+  only valid near the boundary (see the analyze.py docstring); the tier/R_req use the correct μ-space scaling.
+- **`analyze.py` · stage 2 (classify)** — bins models into physics classes via interpretable cuts (LSP composition
+  from `NMIX`, mass splittings, intermediate sleptons, chargino cτ; WZ/Wh from summed `br_n2_Z`/`br_n2_h`).
+- **`analyze.py` · stage 3 (holes)** — coverage holes = the **`new-strategy`** reach tier (a re-optimised included search can't
   reach them AND a dominant signature none of them exploits → a genuinely *different* analysis, named in
   `alt_strategy`), additionally requiring production `N = σ·target_lumi ≥ hole_min_run3_events` and
   exclusion of classes with an existing dedicated search (`hole_exclude_classes`, e.g. disappearing tracks).
   Holes and targets are **disjoint** (targets ≈ the `lumi` tier). In these scans every hole is a radiative
   compressed higgsino/bino → a **soft-photon + ISR-jet** search (the photon is the χ̃₂⁰→χ̃₁⁰γ *decay* photon,
-  the jet is ISR recoil for the Eᵀmiss trigger — not an ISR photon). The decay-based logic (`classify` WZ/Wh,
-  the `project` signature flag) reads `parse_slha`'s summed BR set: `br_n2_{Z,h,gamma,ll,qq}`,
+  the jet is ISR recoil for the Eᵀmiss trigger — not an ISR photon). The decay-based logic (`analyze`'s WZ/Wh
+  classification and radiative-signature flag) reads `parse_slha`'s summed BR set: `br_n2_{Z,h,gamma,ll,qq}`,
   `br_c1_{W,lep,tau,qq}` — full branching fractions per final state, not single-dominant-channel flags.
 - **`report.py`** — besides the markdown report, for each class present among targets ∪ holes it renders a
   **plain-TikZ Feynman diagram** (compiled with `tectonic`, rasterised with `pdftoppm`) and extracts a
@@ -146,9 +150,9 @@ fan in all scans. Scripts use the Snakemake `script:` directive — they read th
 - **`sensitivity.py`** — for **hand-selected benchmarks** (`config["sensitivity"]["models"]`; EWKino 770/9030/9025,
   Bino-DM 3115), *how much better than the best current search a dedicated analysis must be* to exclude the model.
   **Independent study**: reads `merged.parquet` (the real per-model expected CLs), branches off `merge_exclusion`
-  — *not* classify/project/holes. Baseline = `exp_min_now` (min ExpCLs over the 8); mapped to an expected limit on
+  — *not* `analyze` (classify/holes). Baseline = `exp_min_now` (min ExpCLs over the 8); mapped to an expected limit on
   signal strength via the asymptotic `ExpCLs(μ)=2(1−Φ(μ/σ))`, then projected in μ-space `μ₉₅(L)=μ₉₅(L0)·√(L0/L)`
-  (the physically correct, monotonic scaling — see the √L caveat in `project.py`). Output `R_req = μ₉₅(target)`.
+  (the physically correct, monotonic scaling — see the √L caveat in `analyze.py`). Output `R_req = μ₉₅(target)`.
   **Key subtlety:** the best current search for these compressed models is the soft-*lepton* one, which uses
   *none* of the radiative χ̃₂⁰→χ̃₁⁰γ photon, so **`R_req` is lepton-channel-anchored** and cannot credit a photon
   search. Hence the `verdict`: `luminosity` (R_req≤1) → `lepton re-opt` (R_req≤`assumed_improvement`) →

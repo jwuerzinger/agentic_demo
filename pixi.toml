@@ -28,5 +28,7 @@ run = "snakemake --snakefile workflow/Snakefile --cores 4 --printshellcmds"
 plan = "snakemake --snakefile workflow/Snakefile --cores 1 --dry-run --printshellcmds"
 # Render the rule graph to docs/ (PNG for README embedding + SVG for zoomable detail)
 dag = "mkdir -p docs && snakemake --snakefile workflow/Snakefile --rulegraph | python workflow/cluster_dag.py | tee docs/dag.dot | dot -Tpng -o docs/dag.png && dot -Tsvg docs/dag.dot -o docs/dag.svg && rm -f docs/dag.dot"
+# Same graph, dark-background variant -> docs/dag_dark.png (+ .svg)
+dag-dark = "mkdir -p docs && snakemake --snakefile workflow/Snakefile --rulegraph | python workflow/cluster_dag.py --dark | tee docs/dag_dark.dot | dot -Tpng -o docs/dag_dark.png && dot -Tsvg docs/dag_dark.dot -o docs/dag_dark.svg && rm -f docs/dag_dark.dot"
 # Force a clean re-run
 clean = "rm -rf results"
